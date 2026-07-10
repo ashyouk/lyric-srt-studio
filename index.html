@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#151018">
+    <title>Lyric SRT Studio</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">OFFLINE LYRIC TIMING TOOL</p>
+        <h1>Lyric SRT Studio</h1>
+        <p class="intro">曲を再生し、歌詞行をタップして開始時刻を記録。日本語・English・日英併記の SRT を端末内だけで作れます。</p>
+      </header>
+
+      <section class="panel playback" aria-label="再生と記録">
+        <label class="file-picker" for="media-file"><span>曲を選ぶ</span><input id="media-file" type="file"></label>
+        <span id="media-name">まだ曲を選んでいません</span>
+        <audio id="player" controls preload="auto" playsinline></audio>
+        <div class="seek"><output id="current-time">00:00.0</output><input id="progress" type="range" min="0" max="100" value="0" step="1"></div>
+        <button id="capture-active" class="capture" type="button">● 今の時刻を記録 <kbd>Space</kbd></button>
+        <p id="status" class="status" role="status">歌詞を入れ、曲を選んで再生してください。</p>
+      </section>
+
+      <section class="panel lyrics" aria-label="歌詞行">
+        <div class="section-title"><div><p class="eyebrow">LYRICS</p><h2>歌詞をまとめて貼り付ける</h2></div></div>
+        <div class="bulk-inputs">
+          <label><span>日本語歌詞（1行＝1字幕）</span><textarea id="bulk-jp" placeholder="歌詞をここへまとめて貼り付け&#10;1行目&#10;2行目&#10;3行目"></textarea></label>
+          <label><span>English lyrics（任意・行の順番を対応）</span><textarea id="bulk-en" placeholder="Paste English lyrics here&#10;Line one&#10;Line two&#10;Line three"></textarea></label>
+        </div>
+        <button id="apply-lyrics" class="apply-lyrics" type="button">歌詞を反映して一覧を作る</button>
+        <div class="section-title line-title"><div><p class="eyebrow">LYRIC LINES</p><h2>タイミングを記録 <span id="line-count"></span></h2></div><button id="add-line" type="button">＋ 行を追加</button></div>
+        <div class="legend"><span>曲を再生し、歌詞の行を押すだけで現在時刻を記録します。</span><span>再生中は Space / Enter でも、選択行を記録できます。</span></div>
+        <div id="rows"></div>
+        <button id="clear-times" class="quiet" type="button">記録時刻をすべて消去</button>
+      </section>
+
+      <section class="panel export" aria-label="SRT書き出し">
+        <div><p class="eyebrow">EXPORT</p><h2>字幕ファイルを書き出す</h2><p>最後の行は曲の終わりまで表示されます。記録時刻は上から順に入れてください。</p></div>
+        <div class="export-buttons"><button id="export-jp" type="button">日本語 SRT</button><button id="export-en" type="button">English SRT</button><button id="export-bilingual" class="primary" type="button">日英併記 SRT</button></div>
+      </section>
+      <footer>ファイルはアップロードされません。歌詞の下書きは、このブラウザ内に保存されます。</footer>
+    </main>
+    <script defer src="app.js"></script>
+  </body>
+</html>
