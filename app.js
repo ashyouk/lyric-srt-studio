@@ -34,7 +34,7 @@ function makeSrt(lines, language, duration = 0) {
 }
 
 const STORAGE_KEY = "lyric-srt-studio-v1";
-const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "" };
+const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "", history: [], waveform: null };
 
 const $ = (selector) => document.querySelector(selector);
 const rows = $("#rows");
@@ -42,6 +42,9 @@ const player = $("#player");
 const status = $("#status");
 const currentTime = $("#current-time");
 const progress = $("#progress");
+const waveform = $("#waveform");
+const waveformStatus = $("#waveform-status");
+let waveformFrame = null;
 
 function newId() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 function newLine() { return { id: newId(), jp: "", en: "", start: null }; }
@@ -86,7 +89,7 @@ function fileWithKnownMediaType(file) {
   return new File([file], file.name, { type, lastModified: file.lastModified });
 }
 
-function render() {
+function render(scrollActive = false) {
   rows.innerHTML = "";
   state.lines.forEach((line, index) => {
     const item = document.createElement("article");
@@ -100,6 +103,10 @@ function render() {
       <div class="timing">
         <output>${line.start === null || line.start === "" ? "--:--.-" : timeLabel(line.start)}</output>
         <button type="button" data-action="capture">ここで記録</button>
+        <div class="fine-adjust" aria-label="時刻を微調整">
+          <button type="button" data-adjust="-0.5">−.5</button><button type="button" data-adjust="-0.1">−.1</button>
+          <button type="button" data-adjust="0.1">＋.1</button><button type="button" data-adjust="0.5">＋.5</button>
+        </div>
         <button class="icon-button" type="button" data-action="delete" aria-label="この行を削除">×</button>
       </div>`;
     item.addEventListener("click", (event) => {
@@ -112,9 +119,13 @@ function render() {
     item.querySelector("[data-action=select]").onclick = () => selectLine(index);
     item.querySelector("[data-action=capture]").onclick = () => capture(index);
     item.querySelector("[data-action=delete]").onclick = () => removeLine(index);
+    item.querySelectorAll("[data-adjust]").forEach((button) => { button.onclick = () => adjustTime(index, Number(button.dataset.adjust)); });
     rows.append(item);
   });
   $("#line-count").textContent = `${state.lines.length} 行`;
+  updateFocus();
+  drawWaveform();
+  if (scrollActive) requestAnimationFrame(() => rows.children[state.activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" }));
 }
 
 function escapeHtml(value) {
@@ -123,15 +134,42 @@ function escapeHtml(value) {
 
 function selectLine(index) {
   state.activeIndex = Math.max(0, Math.min(index, state.lines.length - 1));
-  render();
+  render(true);
 }
 
 function capture(index = state.activeIndex) {
   if (!state.lines.length) return;
+  state.history.push({ index, previous: state.lines[index].start });
   state.lines[index].start = Number(player.currentTime.toFixed(3));
   state.activeIndex = Math.min(index + 1, state.lines.length - 1);
-  save(); render();
+  save(); render(true);
   status.textContent = `${index + 1} 行目を ${timeLabel(player.currentTime)} に記録しました。`;
+}
+
+function updateFocus() {
+  const line = state.lines[state.activeIndex];
+  $("#focus-number").textContent = line ? `${state.activeIndex + 1} / ${state.lines.length}` : "";
+  $("#focus-jp").textContent = line?.jp || line?.en || "歌詞を入力してください";
+  $("#focus-en").textContent = line?.jp ? (line.en || "") : "";
+}
+
+function adjustTime(index, delta) {
+  const line = state.lines[index];
+  if (line.start === null || line.start === "") { status.textContent = "先にこの行の時刻を記録してください。"; return; }
+  state.history.push({ index, previous: line.start });
+  line.start = Number(Math.max(0, Math.min(state.duration || Infinity, Number(line.start) + delta)).toFixed(3));
+  state.activeIndex = index;
+  save(); render();
+  status.textContent = `${index + 1} 行目を ${delta > 0 ? "+" : ""}${delta.toFixed(1)} 秒調整しました。`;
+}
+
+function undoCapture() {
+  const change = state.history.pop();
+  if (!change) { status.textContent = "取り消せる操作はありません。"; return; }
+  state.lines[change.index].start = change.previous;
+  state.activeIndex = change.index;
+  save(); render(true);
+  status.textContent = `${change.index + 1} 行目の直前の時刻操作を取り消しました。`;
 }
 
 function removeLine(index) {
@@ -139,6 +177,12 @@ function removeLine(index) {
   if (!state.lines.length) state.lines.push(newLine());
   state.activeIndex = Math.min(state.activeIndex, state.lines.length - 1);
   save(); render();
+}
+
+function rewind(seconds = 3) {
+  player.currentTime = Math.max(0, player.currentTime - seconds);
+  status.textContent = `${seconds} 秒戻しました。`;
+  drawWaveform();
 }
 
 function addLine() {
@@ -159,8 +203,73 @@ function applyLyrics() {
   if (!count) { status.textContent = "日本語または English の歌詞を、1行ずつ貼り付けてください。"; return; }
   state.lines = Array.from({ length: count }, (_, index) => ({ id: newId(), jp: jp[index] || "", en: en[index] || "", start: null }));
   state.activeIndex = 0;
+  state.history = [];
   save(); render();
   status.textContent = `${count} 行の歌詞を表示しました。曲を再生して、歌詞の行を押すだけで記録できます。`;
+}
+
+async function loadWaveform(file) {
+  state.waveform = null;
+  waveformStatus.hidden = false;
+  waveformStatus.textContent = "波形を端末内で解析しています…";
+  drawWaveform();
+  try {
+    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("AudioContext unavailable");
+    const context = new AudioContextClass();
+    const buffer = await context.decodeAudioData(await file.arrayBuffer());
+    const bins = 900;
+    const peaks = new Float32Array(bins);
+    const step = Math.max(1, Math.floor(buffer.length / bins));
+    for (let bin = 0; bin < bins; bin += 1) {
+      const start = bin * step;
+      const end = Math.min(buffer.length, start + step);
+      let peak = 0;
+      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        const data = buffer.getChannelData(channel);
+        for (let sample = start; sample < end; sample += Math.max(1, Math.floor(step / 80))) peak = Math.max(peak, Math.abs(data[sample] || 0));
+      }
+      peaks[bin] = peak;
+    }
+    state.waveform = { peaks, duration: buffer.duration };
+    waveformStatus.hidden = true;
+    await context.close();
+    drawWaveform();
+  } catch {
+    waveformStatus.hidden = false;
+    waveformStatus.textContent = "この曲の波形は表示できませんが、再生と記録はそのまま使えます。";
+  }
+}
+
+function drawWaveform() {
+  const rect = waveform.getBoundingClientRect();
+  const ratio = Math.max(1, globalThis.devicePixelRatio || 1);
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (waveform.width !== width || waveform.height !== height) { waveform.width = width; waveform.height = height; }
+  const context = waveform.getContext("2d");
+  context.clearRect(0, 0, width, height);
+  if (!state.waveform) return;
+  const { peaks, duration } = state.waveform;
+  const played = duration ? Math.min(1, player.currentTime / duration) : 0;
+  const center = height / 2;
+  for (let x = 0; x < width; x += Math.max(1, Math.round(ratio))) {
+    const peak = peaks[Math.min(peaks.length - 1, Math.floor(x / width * peaks.length))];
+    context.fillStyle = x / width <= played ? "#f1bad2" : "#755468";
+    const bar = Math.max(ratio, peak * height * .86);
+    context.fillRect(x, center - bar / 2, Math.max(1, ratio), bar);
+  }
+  state.lines.forEach((line, index) => {
+    if (line.start === null || line.start === "") return;
+    const x = Number(line.start) / duration * width;
+    context.fillStyle = index === state.activeIndex ? "#fff4a8" : "rgba(255,255,255,.55)";
+    context.fillRect(x, 0, Math.max(1, ratio), height);
+  });
+}
+
+function scheduleWaveformDraw() {
+  if (waveformFrame) return;
+  waveformFrame = requestAnimationFrame(() => { waveformFrame = null; drawWaveform(); });
 }
 
 function download(language) {
@@ -187,6 +296,7 @@ $("#media-file").addEventListener("change", (event) => {
   player.load();
   $("#media-name").textContent = file.name;
   status.textContent = "曲を読み込んでいます…";
+  loadWaveform(file);
 });
 
 player.addEventListener("loadedmetadata", () => { state.duration = player.duration; progress.max = Math.floor(player.duration * 1000); });
@@ -195,22 +305,36 @@ player.addEventListener("error", () => {
   const detail = player.error?.code === 4 ? "この形式はiPhoneで再生できません。MP3 / M4A / WAV を試してください。" : "曲を読み込めませんでした。もう一度ファイルを選び直してください。";
   status.textContent = detail;
 });
-player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); });
-progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; });
+player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); scheduleWaveformDraw(); });
+progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; drawWaveform(); });
+waveform.addEventListener("click", (event) => {
+  const rect = waveform.getBoundingClientRect();
+  const duration = state.duration || state.waveform?.duration;
+  if (duration) player.currentTime = Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration));
+});
+globalThis.addEventListener("resize", scheduleWaveformDraw);
 
 $("#add-line").onclick = addLine;
 $("#apply-lyrics").onclick = applyLyrics;
 $("#bulk-jp").addEventListener("input", save);
 $("#bulk-en").addEventListener("input", save);
 $("#capture-active").onclick = () => capture();
-$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); save(); render(); status.textContent = "記録した時刻を消去しました。"; };
+$("#capture-console").onclick = () => capture();
+$("#rewind-3").onclick = () => rewind();
+$("#undo-capture").onclick = undoCapture;
+document.querySelectorAll("[data-rate]").forEach((button) => { button.onclick = () => {
+  player.playbackRate = Number(button.dataset.rate);
+  document.querySelectorAll("[data-rate]").forEach((candidate) => candidate.classList.toggle("selected", candidate === button));
+  status.textContent = `再生速度を ${Number(button.dataset.rate)} 倍にしました。`;
+}; });
+$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); state.history = []; save(); render(); status.textContent = "記録した時刻を消去しました。"; };
 $("#export-jp").onclick = () => download("jp");
 $("#export-en").onclick = () => download("en");
 $("#export-bilingual").onclick = () => download("bilingual");
 
 document.addEventListener("keydown", (event) => {
-  const isTyping = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (!isTyping && (event.code === "Space" || event.key === "Enter")) {
+  const isInteractive = ["INPUT", "TEXTAREA", "BUTTON", "AUDIO"].includes(document.activeElement?.tagName);
+  if (!isInteractive && (event.code === "Space" || event.key === "Enter")) {
     event.preventDefault(); capture();
   }
 });
