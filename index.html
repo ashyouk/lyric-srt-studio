@@ -20,6 +20,10 @@
         <span id="media-name">まだ曲を選んでいません</span>
         <audio id="player" controls preload="auto" playsinline></audio>
         <div class="seek"><output id="current-time">00:00.0</output><input id="progress" type="range" min="0" max="100" value="0" step="1"></div>
+        <div class="waveform-wrap">
+          <canvas id="waveform" aria-label="曲の波形。押した位置へ移動できます"></canvas>
+          <p id="waveform-status">曲を選ぶと、ここに波形を表示します。</p>
+        </div>
         <button id="capture-active" class="capture" type="button">● 今の時刻を記録 <kbd>Space</kbd></button>
         <p id="status" class="status" role="status">歌詞を入れ、曲を選んで再生してください。</p>
       </section>
@@ -33,6 +37,17 @@
         <button id="apply-lyrics" class="apply-lyrics" type="button">歌詞を反映して一覧を作る</button>
         <div class="section-title line-title"><div><p class="eyebrow">LYRIC LINES</p><h2>タイミングを記録 <span id="line-count"></span></h2></div><button id="add-line" type="button">＋ 行を追加</button></div>
         <div class="legend"><span>曲を再生し、歌詞の行を押すだけで現在時刻を記録します。</span><span>再生中は Space / Enter でも、選択行を記録できます。</span></div>
+        <aside class="timing-console" aria-label="タイミング操作盤">
+          <div class="next-line"><span>次に記録する行 <b id="focus-number"></b></span><strong id="focus-jp">歌詞を入力してください</strong><small id="focus-en"></small></div>
+          <div class="transport-tools">
+            <button id="rewind-3" type="button">↶ 3秒戻る</button>
+            <button id="undo-capture" type="button">直前を取消</button>
+            <div class="speed" aria-label="再生速度">
+              <span>速度</span><button type="button" data-rate="0.5">0.5</button><button type="button" data-rate="0.75">0.75</button><button class="selected" type="button" data-rate="1">1.0</button>
+            </div>
+          </div>
+          <button id="capture-console" class="capture console-capture" type="button">● この行を記録して次へ</button>
+        </aside>
         <div id="rows"></div>
         <button id="clear-times" class="quiet" type="button">記録時刻をすべて消去</button>
       </section>
