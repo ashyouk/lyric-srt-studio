@@ -44,6 +44,11 @@ const currentTime = $("#current-time");
 const progress = $("#progress");
 const waveform = $("#waveform");
 const waveformStatus = $("#waveform-status");
+const timelineViewport = $("#timeline-viewport");
+const timelineTrack = $("#timeline-track");
+const timelineBlocks = $("#timeline-blocks");
+const timelineRuler = $("#timeline-ruler");
+const timelinePlayhead = $("#timeline-playhead");
 let waveformFrame = null;
 
 function newId() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
@@ -125,6 +130,7 @@ function render(scrollActive = false) {
   $("#line-count").textContent = `${state.lines.length} 行`;
   updateFocus();
   drawWaveform();
+  renderTimeline();
   if (scrollActive) requestAnimationFrame(() => rows.children[state.activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" }));
 }
 
@@ -272,6 +278,73 @@ function scheduleWaveformDraw() {
   waveformFrame = requestAnimationFrame(() => { waveformFrame = null; drawWaveform(); });
 }
 
+function recordedLines() {
+  return state.lines
+    .map((line, index) => ({ ...line, index, rawStart: line.start, start: Number(line.start) }))
+    .filter((line) => line.rawStart !== null && line.rawStart !== "" && Number.isFinite(line.start));
+}
+
+function renderTimeline() {
+  const duration = Number(state.duration || state.waveform?.duration || 0);
+  const recorded = recordedLines();
+  $("#timeline-count").textContent = `${recorded.length} / ${state.lines.length} 行を記録`;
+  $("#timeline-empty").hidden = recorded.length > 0;
+  timelineBlocks.innerHTML = "";
+  timelineRuler.innerHTML = "";
+
+  const viewportWidth = timelineViewport.clientWidth || 320;
+  const trackWidth = duration ? Math.max(viewportWidth, Math.min(2600, duration * 5)) : viewportWidth;
+  timelineTrack.style.width = `${Math.round(trackWidth)}px`;
+
+  if (duration) {
+    const tickStep = duration <= 90 ? 10 : duration <= 240 ? 30 : 60;
+    for (let seconds = 0; seconds <= duration; seconds += tickStep) {
+      const tick = document.createElement("span");
+      tick.className = "timeline-tick";
+      tick.style.left = `${seconds / duration * 100}%`;
+      tick.innerHTML = `<span>${timeLabel(seconds).slice(0, 5)}</span>`;
+      timelineRuler.append(tick);
+    }
+  }
+
+  recorded.forEach((line, recordedIndex) => {
+    if (!duration) return;
+    const next = recorded.slice(recordedIndex + 1).find((candidate) => candidate.start > line.start);
+    const end = next?.start || duration;
+    const left = Math.max(0, Math.min(100, line.start / duration * 100));
+    const width = Math.max(.35, Math.min(100 - left, (Math.max(line.start + .25, end) - line.start) / duration * 100));
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `timeline-block ${line.index === state.activeIndex ? "active" : ""}`;
+    button.style.left = `${left}%`;
+    button.style.width = `${width}%`;
+    button.title = `${line.index + 1}. ${line.jp || line.en || "歌詞なし"} — ${timeLabel(line.start)}`;
+    button.innerHTML = `<b>${line.index + 1}. ${escapeHtml(line.jp || line.en || "歌詞なし")}</b><small class="block-time">${timeLabel(line.start)}</small>`;
+    button.onclick = () => selectTimelineLine(line.index, line.start);
+    timelineBlocks.append(button);
+  });
+  updateTimelinePlayhead(false);
+}
+
+function selectTimelineLine(index, start) {
+  state.activeIndex = index;
+  player.currentTime = start;
+  render();
+  status.textContent = `${index + 1} 行目の ${timeLabel(start)} に移動しました。`;
+}
+
+function updateTimelinePlayhead(follow = true) {
+  const duration = Number(state.duration || state.waveform?.duration || 0);
+  if (!duration) { timelinePlayhead.style.transform = "translateX(0)"; return; }
+  const trackWidth = timelineTrack.clientWidth || 1;
+  const x = Math.max(0, Math.min(trackWidth, player.currentTime / duration * trackWidth));
+  timelinePlayhead.style.transform = `translateX(${x}px)`;
+  if (!follow || player.paused) return;
+  const left = timelineViewport.scrollLeft;
+  const width = timelineViewport.clientWidth;
+  if (x < left + width * .15 || x > left + width * .85) timelineViewport.scrollTo({ left: Math.max(0, x - width * .3), behavior: "smooth" });
+}
+
 function download(language) {
   const errors = validateLines(state.lines);
   if (errors.length) { status.textContent = errors[0]; return; }
@@ -299,20 +372,20 @@ $("#media-file").addEventListener("change", (event) => {
   loadWaveform(file);
 });
 
-player.addEventListener("loadedmetadata", () => { state.duration = player.duration; progress.max = Math.floor(player.duration * 1000); });
+player.addEventListener("loadedmetadata", () => { state.duration = player.duration; progress.max = Math.floor(player.duration * 1000); renderTimeline(); });
 player.addEventListener("canplay", () => { status.textContent = "曲を読み込みました。再生しながら歌詞の行を押してください。"; });
 player.addEventListener("error", () => {
   const detail = player.error?.code === 4 ? "この形式はiPhoneで再生できません。MP3 / M4A / WAV を試してください。" : "曲を読み込めませんでした。もう一度ファイルを選び直してください。";
   status.textContent = detail;
 });
-player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); scheduleWaveformDraw(); });
-progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; drawWaveform(); });
+player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); scheduleWaveformDraw(); updateTimelinePlayhead(); });
+progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; drawWaveform(); updateTimelinePlayhead(false); });
 waveform.addEventListener("click", (event) => {
   const rect = waveform.getBoundingClientRect();
   const duration = state.duration || state.waveform?.duration;
   if (duration) player.currentTime = Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration));
 });
-globalThis.addEventListener("resize", scheduleWaveformDraw);
+globalThis.addEventListener("resize", () => { scheduleWaveformDraw(); renderTimeline(); });
 
 $("#add-line").onclick = addLine;
 $("#apply-lyrics").onclick = applyLyrics;
