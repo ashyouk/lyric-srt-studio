@@ -24,6 +24,21 @@
           <canvas id="waveform" aria-label="曲の波形。押した位置へ移動できます"></canvas>
           <p id="waveform-status">曲を選ぶと、ここに波形を表示します。</p>
         </div>
+        <section class="subtitle-timeline-panel" aria-label="字幕タイムライン">
+          <div class="timeline-heading">
+            <div><span class="timeline-kicker">SUBTITLE TIMELINE</span><strong>歌詞の配置</strong></div>
+            <span id="timeline-count">0 / 0 行を記録</span>
+          </div>
+          <div id="timeline-viewport" class="timeline-viewport">
+            <div id="timeline-track" class="timeline-track">
+              <div id="timeline-ruler" class="timeline-ruler" aria-hidden="true"></div>
+              <div id="timeline-blocks" class="timeline-blocks"></div>
+              <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"><span></span></div>
+              <p id="timeline-empty">時刻を記録すると、歌詞がここに並びます。</p>
+            </div>
+          </div>
+          <p class="timeline-help">歌詞ブロックを押すと、その行と再生位置へ移動します。横にスライドして曲全体を確認できます。</p>
+        </section>
         <button id="capture-active" class="capture" type="button">● 今の時刻を記録 <kbd>Space</kbd></button>
         <p id="status" class="status" role="status">歌詞を入れ、曲を選んで再生してください。</p>
       </section>
