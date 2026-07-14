@@ -33,8 +33,44 @@ function makeSrt(lines, language, duration = 0) {
   }).join("\n\n") + "\n";
 }
 
+function analyzeProject(lines, duration = 0) {
+  const issues = [];
+  const hasJapanese = lines.some((line) => String(line.jp || "").trim());
+  const hasEnglish = lines.some((line) => String(line.en || "").trim());
+  const starts = lines.map((line) => line.start === null || line.start === "" ? null : Number(line.start));
+
+  let previousTimed = null;
+  lines.forEach((line, index) => {
+    const jp = String(line.jp || "").trim();
+    const en = String(line.en || "").trim();
+    const start = starts[index];
+    if (!jp && !en) issues.push({ index, severity: "error", code: "empty", message: "歌詞が空欄です。" });
+    if (start === null || !Number.isFinite(start)) issues.push({ index, severity: "error", code: "unrecorded", message: "開始時刻が未記録です。" });
+    if (start !== null && Number.isFinite(start) && (start < 0 || (duration > 0 && start > duration))) issues.push({ index, severity: "error", code: "range", message: "開始時刻が曲の範囲外です。" });
+    if (hasJapanese && hasEnglish && (!jp || !en)) issues.push({ index, severity: "warning", code: "language", message: `${!jp ? "日本語" : "English"} が空欄です。` });
+    if (start !== null && Number.isFinite(start)) {
+      if (previousTimed !== null && start <= previousTimed) issues.push({ index, severity: "error", code: "order", message: "前の記録済み行より後の時刻にしてください。" });
+      previousTimed = start;
+    }
+  });
+
+  lines.forEach((line, index) => {
+    const start = starts[index];
+    if (start === null || !Number.isFinite(start)) return;
+    const next = index < lines.length - 1 ? starts[index + 1] : (duration > start ? duration : null);
+    if (next === null || !Number.isFinite(next) || next <= start) return;
+    const span = next - start;
+    if (span < .5) issues.push({ index, severity: "warning", code: "short", message: `表示時間が短すぎます（${span.toFixed(2)}秒）。` });
+    if (span > 15) issues.push({ index, severity: "warning", code: "long", message: `表示時間が長めです（${span.toFixed(1)}秒）。` });
+  });
+
+  const errorLines = new Set(issues.filter((issue) => issue.severity === "error").map((issue) => issue.index));
+  const readyCount = lines.filter((line, index) => !errorLines.has(index) && (line.jp || line.en) && starts[index] !== null).length;
+  return { issues, readyCount, total: lines.length, errors: issues.filter((issue) => issue.severity === "error").length, warnings: issues.filter((issue) => issue.severity === "warning").length };
+}
+
 const STORAGE_KEY = "lyric-srt-studio-v1";
-const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "", history: [], waveform: null };
+const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "", history: [], waveform: null, previewMode: "bilingual" };
 
 const $ = (selector) => document.querySelector(selector);
 const rows = $("#rows");
@@ -50,6 +86,7 @@ const timelineBlocks = $("#timeline-blocks");
 const timelineRuler = $("#timeline-ruler");
 const timelinePlayhead = $("#timeline-playhead");
 let waveformFrame = null;
+let undoToastTimer = null;
 
 function newId() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 function newLine() { return { id: newId(), jp: "", en: "", start: null }; }
@@ -96,9 +133,16 @@ function fileWithKnownMediaType(file) {
 
 function render(scrollActive = false) {
   rows.innerHTML = "";
+  const report = analyzeProject(state.lines, state.duration);
+  const issuesByLine = new Map();
+  report.issues.forEach((issue) => {
+    const current = issuesByLine.get(issue.index);
+    if (!current || (issue.severity === "error" && current.severity !== "error")) issuesByLine.set(issue.index, issue);
+  });
   state.lines.forEach((line, index) => {
+    const lineIssue = issuesByLine.get(index);
     const item = document.createElement("article");
-    item.className = `line ${index === state.activeIndex ? "active" : ""}`;
+    item.className = `line ${index === state.activeIndex ? "active" : ""} ${lineIssue ? `has-${lineIssue.severity}` : ""}`;
     item.innerHTML = `
       <button class="line-number" type="button" data-action="select" aria-label="${index + 1}行目を選択">${index + 1}</button>
       <div class="inputs">
@@ -108,6 +152,7 @@ function render(scrollActive = false) {
       <div class="timing">
         <output>${line.start === null || line.start === "" ? "--:--.-" : timeLabel(line.start)}</output>
         <button type="button" data-action="capture">ここで記録</button>
+        ${lineIssue ? `<span class="line-alert">${lineIssue.severity === "error" ? "●" : "▲"} ${escapeHtml(lineIssue.message)}</span>` : ""}
         <div class="fine-adjust" aria-label="時刻を微調整">
           <button type="button" data-adjust="-0.5">−.5</button><button type="button" data-adjust="-0.1">−.1</button>
           <button type="button" data-adjust="0.1">＋.1</button><button type="button" data-adjust="0.5">＋.5</button>
@@ -120,6 +165,9 @@ function render(scrollActive = false) {
     item.querySelectorAll("textarea").forEach((textarea) => textarea.addEventListener("input", () => {
       state.lines[index][textarea.dataset.field] = textarea.value;
       save();
+      renderTimeline();
+      renderQuality();
+      updateSubtitlePreview();
     }));
     item.querySelector("[data-action=select]").onclick = () => selectLine(index);
     item.querySelector("[data-action=capture]").onclick = () => capture(index);
@@ -129,8 +177,11 @@ function render(scrollActive = false) {
   });
   $("#line-count").textContent = `${state.lines.length} 行`;
   updateFocus();
+  updateUndoControl();
   drawWaveform();
   renderTimeline();
+  renderQuality(report);
+  updateSubtitlePreview();
   if (scrollActive) requestAnimationFrame(() => rows.children[state.activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" }));
 }
 
@@ -145,11 +196,12 @@ function selectLine(index) {
 
 function capture(index = state.activeIndex) {
   if (!state.lines.length) return;
-  state.history.push({ index, previous: state.lines[index].start });
+  state.history.push({ index, previous: state.lines[index].start, action: "時刻の記録" });
   state.lines[index].start = Number(player.currentTime.toFixed(3));
   state.activeIndex = Math.min(index + 1, state.lines.length - 1);
   save(); render(true);
   status.textContent = `${index + 1} 行目を ${timeLabel(player.currentTime)} に記録しました。`;
+  showUndoToast(`${index + 1} 行目を ${timeLabel(player.currentTime)} に記録しました`);
 }
 
 function updateFocus() {
@@ -162,11 +214,12 @@ function updateFocus() {
 function adjustTime(index, delta) {
   const line = state.lines[index];
   if (line.start === null || line.start === "") { status.textContent = "先にこの行の時刻を記録してください。"; return; }
-  state.history.push({ index, previous: line.start });
+  state.history.push({ index, previous: line.start, action: `${delta > 0 ? "+" : ""}${delta.toFixed(1)}秒の調整` });
   line.start = Number(Math.max(0, Math.min(state.duration || Infinity, Number(line.start) + delta)).toFixed(3));
   state.activeIndex = index;
   save(); render();
   status.textContent = `${index + 1} 行目を ${delta > 0 ? "+" : ""}${delta.toFixed(1)} 秒調整しました。`;
+  showUndoToast(`${index + 1} 行目を ${delta > 0 ? "+" : ""}${delta.toFixed(1)} 秒調整しました`);
 }
 
 function undoCapture() {
@@ -175,13 +228,35 @@ function undoCapture() {
   state.lines[change.index].start = change.previous;
   state.activeIndex = change.index;
   save(); render(true);
-  status.textContent = `${change.index + 1} 行目の直前の時刻操作を取り消しました。`;
+  hideUndoToast();
+  status.textContent = `${change.index + 1} 行目の「${change.action || "時刻操作"}」を元に戻しました。`;
+}
+
+function updateUndoControl() {
+  const button = $("#undo-capture");
+  const change = state.history.at(-1);
+  button.disabled = !change;
+  button.textContent = change ? `↶ ${change.index + 1}行目の${change.action || "時刻操作"}を戻す` : "↶ 戻せる時刻操作はありません";
+}
+
+function showUndoToast(message) {
+  clearTimeout(undoToastTimer);
+  $("#undo-toast-message").textContent = message;
+  $("#undo-toast").hidden = false;
+  undoToastTimer = setTimeout(hideUndoToast, 6500);
+}
+
+function hideUndoToast() {
+  clearTimeout(undoToastTimer);
+  $("#undo-toast").hidden = true;
 }
 
 function removeLine(index) {
   state.lines.splice(index, 1);
   if (!state.lines.length) state.lines.push(newLine());
   state.activeIndex = Math.min(state.activeIndex, state.lines.length - 1);
+  state.history = [];
+  hideUndoToast();
   save(); render();
 }
 
@@ -194,6 +269,8 @@ function rewind(seconds = 3) {
 function addLine() {
   state.lines.splice(state.activeIndex + 1, 0, newLine());
   state.activeIndex += 1;
+  state.history = [];
+  hideUndoToast();
   save(); render();
   rows.querySelectorAll("textarea")[state.activeIndex * 2]?.focus();
 }
@@ -287,6 +364,12 @@ function recordedLines() {
 function renderTimeline() {
   const duration = Number(state.duration || state.waveform?.duration || 0);
   const recorded = recordedLines();
+  const report = analyzeProject(state.lines, duration);
+  const severityByLine = new Map();
+  report.issues.forEach((issue) => {
+    const current = severityByLine.get(issue.index);
+    if (!current || issue.severity === "error") severityByLine.set(issue.index, issue.severity);
+  });
   $("#timeline-count").textContent = `${recorded.length} / ${state.lines.length} 行を記録`;
   $("#timeline-empty").hidden = recorded.length > 0;
   timelineBlocks.innerHTML = "";
@@ -315,7 +398,7 @@ function renderTimeline() {
     const width = Math.max(.35, Math.min(100 - left, (Math.max(line.start + .25, end) - line.start) / duration * 100));
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `timeline-block ${line.index === state.activeIndex ? "active" : ""}`;
+    button.className = `timeline-block ${line.index === state.activeIndex ? "active" : ""} ${severityByLine.has(line.index) ? `has-${severityByLine.get(line.index)}` : ""}`;
     button.style.left = `${left}%`;
     button.style.width = `${width}%`;
     button.title = `${line.index + 1}. ${line.jp || line.en || "歌詞なし"} — ${timeLabel(line.start)}`;
@@ -324,6 +407,56 @@ function renderTimeline() {
     timelineBlocks.append(button);
   });
   updateTimelinePlayhead(false);
+}
+
+function currentPreviewLine(seconds = player.currentTime) {
+  const recorded = recordedLines().sort((a, b) => a.start - b.start);
+  let current = null;
+  for (const line of recorded) {
+    if (line.start <= seconds) current = line;
+    else break;
+  }
+  return current;
+}
+
+function updateSubtitlePreview() {
+  const line = currentPreviewLine();
+  const placeholder = $("#preview-placeholder");
+  const subtitle = $("#preview-subtitle");
+  const jp = state.previewMode === "en" ? "" : String(line?.jp || "").trim();
+  const en = state.previewMode === "jp" ? "" : String(line?.en || "").trim();
+  const hasText = Boolean(line && (jp || en));
+  placeholder.hidden = hasText;
+  subtitle.hidden = !hasText;
+  $("#preview-jp").textContent = jp;
+  $("#preview-jp").hidden = !jp;
+  $("#preview-en").textContent = en;
+  $("#preview-en").hidden = !en;
+}
+
+function renderQuality(report = analyzeProject(state.lines, state.duration)) {
+  $("#quality-score").textContent = `${report.readyCount} / ${report.total} 行`;
+  const summary = $("#quality-summary");
+  const issues = $("#quality-issues");
+  summary.classList.toggle("ready", report.issues.length === 0);
+  summary.textContent = report.issues.length === 0
+    ? "✓ すべての行を確認しました。SRTを書き出せる状態です。"
+    : `未解決：エラー ${report.errors} 件・確認推奨 ${report.warnings} 件`;
+  issues.innerHTML = "";
+  report.issues.slice(0, 10).forEach((issue) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `quality-issue ${issue.severity}`;
+    button.innerHTML = `<b class="issue-icon">${issue.severity === "error" ? "●" : "▲"}</b><span>${issue.index + 1} 行目：${escapeHtml(issue.message)}</span><small>行へ移動</small>`;
+    button.onclick = () => selectLine(issue.index);
+    issues.append(button);
+  });
+  if (report.issues.length > 10) {
+    const more = document.createElement("p");
+    more.className = "quality-more";
+    more.textContent = `ほか ${report.issues.length - 10} 件。各歌詞行にも印を表示しています。`;
+    issues.append(more);
+  }
 }
 
 function selectTimelineLine(index, start) {
@@ -378,8 +511,8 @@ player.addEventListener("error", () => {
   const detail = player.error?.code === 4 ? "この形式はiPhoneで再生できません。MP3 / M4A / WAV を試してください。" : "曲を読み込めませんでした。もう一度ファイルを選び直してください。";
   status.textContent = detail;
 });
-player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); scheduleWaveformDraw(); updateTimelinePlayhead(); });
-progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; drawWaveform(); updateTimelinePlayhead(false); });
+player.addEventListener("timeupdate", () => { currentTime.textContent = timeLabel(player.currentTime); progress.value = Math.floor(player.currentTime * 1000); scheduleWaveformDraw(); updateTimelinePlayhead(); updateSubtitlePreview(); });
+progress.addEventListener("input", () => { player.currentTime = Number(progress.value) / 1000; drawWaveform(); updateTimelinePlayhead(false); updateSubtitlePreview(); });
 waveform.addEventListener("click", (event) => {
   const rect = waveform.getBoundingClientRect();
   const duration = state.duration || state.waveform?.duration;
@@ -395,12 +528,18 @@ $("#capture-active").onclick = () => capture();
 $("#capture-console").onclick = () => capture();
 $("#rewind-3").onclick = () => rewind();
 $("#undo-capture").onclick = undoCapture;
+$("#undo-toast-button").onclick = undoCapture;
+document.querySelectorAll("[data-preview-mode]").forEach((button) => { button.onclick = () => {
+  state.previewMode = button.dataset.previewMode;
+  document.querySelectorAll("[data-preview-mode]").forEach((candidate) => candidate.classList.toggle("selected", candidate === button));
+  updateSubtitlePreview();
+}; });
 document.querySelectorAll("[data-rate]").forEach((button) => { button.onclick = () => {
   player.playbackRate = Number(button.dataset.rate);
   document.querySelectorAll("[data-rate]").forEach((candidate) => candidate.classList.toggle("selected", candidate === button));
   status.textContent = `再生速度を ${Number(button.dataset.rate)} 倍にしました。`;
 }; });
-$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); state.history = []; save(); render(); status.textContent = "記録した時刻を消去しました。"; };
+$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); state.history = []; hideUndoToast(); save(); render(); status.textContent = "記録した時刻を消去しました。"; };
 $("#export-jp").onclick = () => download("jp");
 $("#export-en").onclick = () => download("en");
 $("#export-bilingual").onclick = () => download("bilingual");
