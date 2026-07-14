@@ -39,6 +39,20 @@
           </div>
           <p class="timeline-help">歌詞ブロックを押すと、その行と再生位置へ移動します。横にスライドして曲全体を確認できます。</p>
         </section>
+        <section class="subtitle-preview-panel" aria-label="字幕プレビュー">
+          <div class="preview-heading">
+            <div><span class="timeline-kicker">LIVE PREVIEW</span><strong>字幕プレビュー</strong></div>
+            <div class="preview-modes" aria-label="プレビュー言語">
+              <button type="button" data-preview-mode="jp">日本語</button>
+              <button type="button" data-preview-mode="en">English</button>
+              <button class="selected" type="button" data-preview-mode="bilingual">日英</button>
+            </div>
+          </div>
+          <div class="preview-stage">
+            <p id="preview-placeholder">曲を再生すると、ここに完成時の字幕が表示されます。</p>
+            <div id="preview-subtitle" hidden><strong id="preview-jp"></strong><span id="preview-en"></span></div>
+          </div>
+        </section>
         <button id="capture-active" class="capture" type="button">● 今の時刻を記録 <kbd>Space</kbd></button>
         <p id="status" class="status" role="status">歌詞を入れ、曲を選んで再生してください。</p>
       </section>
@@ -56,7 +70,7 @@
           <div class="next-line"><span>次に記録する行 <b id="focus-number"></b></span><strong id="focus-jp">歌詞を入力してください</strong><small id="focus-en"></small></div>
           <div class="transport-tools">
             <button id="rewind-3" type="button">↶ 3秒戻る</button>
-            <button id="undo-capture" type="button">直前を取消</button>
+            <button id="undo-capture" type="button" disabled>↶ 直前の時刻操作を戻す</button>
             <div class="speed" aria-label="再生速度">
               <span>速度</span><button type="button" data-rate="0.5">0.5</button><button type="button" data-rate="0.75">0.75</button><button class="selected" type="button" data-rate="1">1.0</button>
             </div>
@@ -67,12 +81,19 @@
         <button id="clear-times" class="quiet" type="button">記録時刻をすべて消去</button>
       </section>
 
+      <section class="panel quality" aria-label="完成度チェック">
+        <div class="quality-heading"><div><p class="eyebrow">QUALITY CHECK</p><h2>完成度チェック</h2></div><strong id="quality-score">0 / 0 行</strong></div>
+        <div id="quality-summary" class="quality-summary">歌詞と時刻を確認しています。</div>
+        <div id="quality-issues" class="quality-issues"></div>
+      </section>
+
       <section class="panel export" aria-label="SRT書き出し">
         <div><p class="eyebrow">EXPORT</p><h2>字幕ファイルを書き出す</h2><p>最後の行は曲の終わりまで表示されます。記録時刻は上から順に入れてください。</p></div>
         <div class="export-buttons"><button id="export-jp" type="button">日本語 SRT</button><button id="export-en" type="button">English SRT</button><button id="export-bilingual" class="primary" type="button">日英併記 SRT</button></div>
       </section>
       <footer>ファイルはアップロードされません。歌詞の下書きは、このブラウザ内に保存されます。</footer>
     </main>
+    <div id="undo-toast" class="undo-toast" role="status" hidden><span id="undo-toast-message"></span><button id="undo-toast-button" type="button">元に戻す</button></div>
     <script defer src="app.js"></script>
   </body>
 </html>
