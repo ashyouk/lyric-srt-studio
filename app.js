@@ -70,7 +70,7 @@ function analyzeProject(lines, duration = 0) {
 }
 
 const STORAGE_KEY = "lyric-srt-studio-v1";
-const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "", history: [], waveform: null, previewMode: "bilingual" };
+const state = { lines: [], activeIndex: 0, mediaUrl: null, duration: 0, jpDraft: "", enDraft: "", history: [], future: [], waveform: null, previewMode: "bilingual" };
 
 const $ = (selector) => document.querySelector(selector);
 const rows = $("#rows");
@@ -196,10 +196,12 @@ function selectLine(index) {
 
 function capture(index = state.activeIndex) {
   if (!state.lines.length) return;
-  state.history.push({ index, previous: state.lines[index].start, action: "時刻の記録" });
-  state.lines[index].start = Number(player.currentTime.toFixed(3));
+  const next = Number(player.currentTime.toFixed(3));
+  state.history.push({ index, previous: state.lines[index].start, next, action: "時刻の記録" });
+  state.future = [];
+  state.lines[index].start = next;
   state.activeIndex = Math.min(index + 1, state.lines.length - 1);
-  save(); render(true);
+  save(); render();
   status.textContent = `${index + 1} 行目を ${timeLabel(player.currentTime)} に記録しました。`;
   showUndoToast(`${index + 1} 行目を ${timeLabel(player.currentTime)} に記録しました`);
 }
@@ -214,8 +216,10 @@ function updateFocus() {
 function adjustTime(index, delta) {
   const line = state.lines[index];
   if (line.start === null || line.start === "") { status.textContent = "先にこの行の時刻を記録してください。"; return; }
-  state.history.push({ index, previous: line.start, action: `${delta > 0 ? "+" : ""}${delta.toFixed(1)}秒の調整` });
-  line.start = Number(Math.max(0, Math.min(state.duration || Infinity, Number(line.start) + delta)).toFixed(3));
+  const next = Number(Math.max(0, Math.min(state.duration || Infinity, Number(line.start) + delta)).toFixed(3));
+  state.history.push({ index, previous: line.start, next, action: `${delta > 0 ? "+" : ""}${delta.toFixed(1)}秒の調整` });
+  state.future = [];
+  line.start = next;
   state.activeIndex = index;
   save(); render();
   status.textContent = `${index + 1} 行目を ${delta > 0 ? "+" : ""}${delta.toFixed(1)} 秒調整しました。`;
@@ -226,17 +230,33 @@ function undoCapture() {
   const change = state.history.pop();
   if (!change) { status.textContent = "取り消せる操作はありません。"; return; }
   state.lines[change.index].start = change.previous;
+  state.future.push(change);
   state.activeIndex = change.index;
-  save(); render(true);
-  hideUndoToast();
+  save(); render();
   status.textContent = `${change.index + 1} 行目の「${change.action || "時刻操作"}」を元に戻しました。`;
+  showUndoToast(`${change.index + 1} 行目を元に戻しました（さらに戻せます）`);
+}
+
+function redoCapture() {
+  const change = state.future.pop();
+  if (!change) { status.textContent = "やり直せる操作はありません。"; return; }
+  state.lines[change.index].start = change.next;
+  state.history.push(change);
+  state.activeIndex = change.index;
+  save(); render();
+  status.textContent = `${change.index + 1} 行目の「${change.action || "時刻操作"}」をやり直しました。`;
+  showUndoToast(`${change.index + 1} 行目をやり直しました`);
 }
 
 function updateUndoControl() {
-  const button = $("#undo-capture");
-  const change = state.history.at(-1);
-  button.disabled = !change;
-  button.textContent = change ? `↶ ${change.index + 1}行目の${change.action || "時刻操作"}を戻す` : "↶ 戻せる時刻操作はありません";
+  const undoButton = $("#undo-capture");
+  const redoButton = $("#redo-capture");
+  const undoChange = state.history.at(-1);
+  const redoChange = state.future.at(-1);
+  undoButton.disabled = !undoChange;
+  redoButton.disabled = !redoChange;
+  undoButton.textContent = undoChange ? `↶ 元に戻す（残り ${state.history.length}）` : "↶ 元に戻す";
+  redoButton.textContent = redoChange ? `↷ やり直す（残り ${state.future.length}）` : "↷ やり直す";
 }
 
 function showUndoToast(message) {
@@ -256,6 +276,7 @@ function removeLine(index) {
   if (!state.lines.length) state.lines.push(newLine());
   state.activeIndex = Math.min(state.activeIndex, state.lines.length - 1);
   state.history = [];
+  state.future = [];
   hideUndoToast();
   save(); render();
 }
@@ -270,6 +291,7 @@ function addLine() {
   state.lines.splice(state.activeIndex + 1, 0, newLine());
   state.activeIndex += 1;
   state.history = [];
+  state.future = [];
   hideUndoToast();
   save(); render();
   rows.querySelectorAll("textarea")[state.activeIndex * 2]?.focus();
@@ -287,6 +309,7 @@ function applyLyrics() {
   state.lines = Array.from({ length: count }, (_, index) => ({ id: newId(), jp: jp[index] || "", en: en[index] || "", start: null }));
   state.activeIndex = 0;
   state.history = [];
+  state.future = [];
   save(); render();
   status.textContent = `${count} 行の歌詞を表示しました。曲を再生して、歌詞の行を押すだけで記録できます。`;
 }
@@ -528,6 +551,8 @@ $("#capture-active").onclick = () => capture();
 $("#capture-console").onclick = () => capture();
 $("#rewind-3").onclick = () => rewind();
 $("#undo-capture").onclick = undoCapture;
+$("#redo-capture").onclick = redoCapture;
+$("#locate-active").onclick = () => rows.children[state.activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
 $("#undo-toast-button").onclick = undoCapture;
 document.querySelectorAll("[data-preview-mode]").forEach((button) => { button.onclick = () => {
   state.previewMode = button.dataset.previewMode;
@@ -539,7 +564,7 @@ document.querySelectorAll("[data-rate]").forEach((button) => { button.onclick = 
   document.querySelectorAll("[data-rate]").forEach((candidate) => candidate.classList.toggle("selected", candidate === button));
   status.textContent = `再生速度を ${Number(button.dataset.rate)} 倍にしました。`;
 }; });
-$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); state.history = []; hideUndoToast(); save(); render(); status.textContent = "記録した時刻を消去しました。"; };
+$("#clear-times").onclick = () => { state.lines.forEach((line) => { line.start = null; }); state.history = []; state.future = []; hideUndoToast(); save(); render(); status.textContent = "記録した時刻を消去しました。"; };
 $("#export-jp").onclick = () => download("jp");
 $("#export-en").onclick = () => download("en");
 $("#export-bilingual").onclick = () => download("bilingual");
