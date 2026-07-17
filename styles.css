@@ -82,3 +82,36 @@ textarea { border-color:#3e3740; border-radius:7px; background:#0c0c0e; box-shad
 footer { padding:1.5rem; color:#777078; letter-spacing:.02em; }
 @media (max-width:760px) { .shell{padding-inline:.7rem}.studio-bar{min-height:3.8rem;padding-inline:.35rem}.hero{min-height:0;grid-template-columns:1fr;padding:3.2rem .65rem 2.8rem}.hero-meter{display:none}.hero h1{font-size:clamp(2.55rem,13vw,4.2rem)}.hero .intro{font-size:.86rem}.panel{padding:.9rem;margin:1rem 0}.panel-heading{margin-top:0}.panel-state{display:none}.quality-title,.export-copy{align-items:flex-start}.export-copy .step-number{margin-top:.1rem}.privacy-badge{font-size:.52rem}.preview-stage{min-height:9rem}.studio-brand b{font-size:.68rem} }
 @media (prefers-reduced-motion:no-preference) { .panel { animation:panel-in .45s ease both; }.panel:nth-of-type(2){animation-delay:.05s}.panel:nth-of-type(3){animation-delay:.1s}.panel:nth-of-type(4){animation-delay:.15s}@keyframes panel-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}} }
+
+/* Graphite + deep crimson signal palette */
+:root { --accent:#b52b45; --accent-soft:#e7d8dc; }
+body { background:radial-gradient(circle at 12% -8%,rgba(112,20,39,.2),transparent 32rem),radial-gradient(circle at 95% 18%,rgba(26,48,58,.13),transparent 30rem),linear-gradient(180deg,#08090a,#0d0d0f 55%,#070809); }
+.hero h1 em { color:#d7c7cb; text-shadow:0 0 45px rgba(154,35,58,.16); }
+.eyebrow,.timeline-kicker { color:#a89ca0; }
+.brand-mark { border-color:#542933; background:linear-gradient(145deg,#251216,#101113); box-shadow:0 0 20px rgba(160,34,58,.12); }
+.brand-mark i { background:#c33a54; }
+.hero::after { background:linear-gradient(90deg,transparent,#542631 25%,#542631 75%,transparent); }
+.hero-meter span,.step-number { color:#d7c7cb; }
+.hero-meter i { background:linear-gradient(to top,#551825,#c33752); }
+.step-number { border-color:#562b35; background:#1d1215; box-shadow:inset 0 0 12px rgba(154,35,58,.08); }
+.panel::before { background:linear-gradient(transparent,#a4253e,transparent); }
+.file-picker span { border-color:#b73b52; background:linear-gradient(135deg,#a92a43,#721b2d); color:#fff; box-shadow:0 8px 24px rgba(111,20,39,.22); }
+.file-picker:hover span { background:linear-gradient(135deg,#c23854,#842137); }
+input[type=range] { accent-color:#c13550; }
+.timeline-block { border-color:#b64157; background:linear-gradient(135deg,#a82a42,#581b28); }
+.timeline-block:hover { background:linear-gradient(135deg,#c13751,#6e2333); }
+.timeline-block.active { border-color:#bfeaff; box-shadow:0 0 0 2px rgba(133,215,255,.2),inset 0 1px rgba(255,255,255,.18); }
+.timeline-playhead { background:#c8efff; box-shadow:0 0 8px rgba(122,213,255,.8); }.timeline-playhead span { background:#c8efff; }
+.capture { border-color:#bd3a53; background:linear-gradient(135deg,#a82a43,#661b2c); box-shadow:0 10px 25px rgba(99,20,37,.22); }
+.capture:hover { border-color:#d24b67; background:linear-gradient(135deg,#bd344f,#7d2236); box-shadow:0 12px 32px rgba(130,26,48,.28); }
+.apply-lyrics { border-color:#6f6266; background:#d6cdd0; color:#191719; }.apply-lyrics:hover { background:#eee8ea; }
+.preview-modes button.selected,.speed button.selected,.active .line-number { border-color:#b63a51; background:#a32941; color:#fff; }
+.timing-console { border-color:#542a34; }
+.line.active { background:linear-gradient(90deg,rgba(156,35,58,.17),rgba(156,35,58,.025) 65%,transparent); }
+.timing output,.quality-heading > strong { color:#d4bdc3; }
+textarea:focus { border-color:#803445; box-shadow:0 0 0 3px rgba(149,35,57,.1),inset 0 1px 4px rgba(0,0,0,.28); }
+.export-buttons .primary { border-color:#b83a52; background:linear-gradient(135deg,#a82a43,#661b2c); }
+.undo-toast { border-color:#66313d; }.undo-toast button { border-color:#b94359; color:#e3cbd1; }
+.transport-tools { row-gap:.4rem; }.transport-tools #undo-capture:not(:disabled),.transport-tools #redo-capture:not(:disabled) { border-color:#6d3b46; background:#26171b; color:#e2d4d7; }
+#locate-active { border-style:dashed; color:#b7aeb1; }
+@media (max-width:680px) { .transport-tools > button { min-width:calc(50% - .25rem); }.speed { width:100%; padding:.25rem 0 0; }.console-capture { position:relative; } }
