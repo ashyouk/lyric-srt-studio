@@ -3,20 +3,28 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#151018">
+    <meta name="theme-color" content="#09090b">
     <title>Lyric SRT Studio</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">OFFLINE LYRIC TIMING TOOL</p>
-        <h1>Lyric SRT Studio</h1>
-        <p class="intro">曲を再生し、歌詞行をタップして開始時刻を記録。日本語・English・日英併記の SRT を端末内だけで作れます。</p>
+      <nav class="studio-bar" aria-label="アプリ情報">
+        <a class="studio-brand" href="#" aria-label="Lyric SRT Studio トップ"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span><b>LYRIC SRT</b><small>STUDIO</small></span></a>
+        <div class="privacy-badge"><span aria-hidden="true">●</span> LOCAL SESSION</div>
+      </nav>
+      <header class="hero">
+        <div>
+          <p class="eyebrow">SUBTITLE TIMING WORKSPACE</p>
+          <h1>音に、言葉の<br><em>居場所をつくる。</em></h1>
+          <p class="intro">曲を再生し、歌詞行をタップして開始時刻を記録。日本語・English・日英併記の SRT を、端末内だけで仕上げます。</p>
+        </div>
+        <div class="hero-meter" aria-hidden="true"><span>01</span><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><small>READY TO CREATE</small></div>
       </header>
 
       <section class="panel playback" aria-label="再生と記録">
-        <label class="file-picker" for="media-file"><span>曲を選ぶ</span><input id="media-file" type="file"></label>
+        <div class="panel-heading"><span class="step-number">01</span><div><p class="eyebrow">AUDIO WORKSPACE</p><h2>曲を読み込む</h2></div><span class="panel-state">LOCAL AUDIO</span></div>
+        <label class="file-picker" for="media-file"><span>＋ 曲を選ぶ</span><input id="media-file" type="file"></label>
         <span id="media-name">まだ曲を選んでいません</span>
         <audio id="player" controls preload="auto" playsinline></audio>
         <div class="seek"><output id="current-time">00:00.0</output><input id="progress" type="range" min="0" max="100" value="0" step="1"></div>
@@ -58,6 +66,7 @@
       </section>
 
       <section class="panel lyrics" aria-label="歌詞行">
+        <div class="panel-heading"><span class="step-number">02</span><div><p class="eyebrow">LYRIC EDITOR</p><h2>歌詞とタイミング</h2></div><span class="panel-state">TAP TO SYNC</span></div>
         <div class="section-title"><div><p class="eyebrow">LYRICS</p><h2>歌詞をまとめて貼り付ける</h2></div></div>
         <div class="bulk-inputs">
           <label><span>日本語歌詞（1行＝1字幕）</span><textarea id="bulk-jp" placeholder="歌詞をここへまとめて貼り付け&#10;1行目&#10;2行目&#10;3行目"></textarea></label>
@@ -82,13 +91,13 @@
       </section>
 
       <section class="panel quality" aria-label="完成度チェック">
-        <div class="quality-heading"><div><p class="eyebrow">QUALITY CHECK</p><h2>完成度チェック</h2></div><strong id="quality-score">0 / 0 行</strong></div>
+        <div class="quality-heading"><div class="quality-title"><span class="step-number">03</span><div><p class="eyebrow">QUALITY CHECK</p><h2>完成度チェック</h2></div></div><strong id="quality-score">0 / 0 行</strong></div>
         <div id="quality-summary" class="quality-summary">歌詞と時刻を確認しています。</div>
         <div id="quality-issues" class="quality-issues"></div>
       </section>
 
       <section class="panel export" aria-label="SRT書き出し">
-        <div><p class="eyebrow">EXPORT</p><h2>字幕ファイルを書き出す</h2><p>最後の行は曲の終わりまで表示されます。記録時刻は上から順に入れてください。</p></div>
+        <div class="export-copy"><span class="step-number">04</span><div><p class="eyebrow">EXPORT</p><h2>字幕ファイルを書き出す</h2><p>最後の行は曲の終わりまで表示されます。記録時刻は上から順に入れてください。</p></div></div>
         <div class="export-buttons"><button id="export-jp" type="button">日本語 SRT</button><button id="export-en" type="button">English SRT</button><button id="export-bilingual" class="primary" type="button">日英併記 SRT</button></div>
       </section>
       <footer>ファイルはアップロードされません。歌詞の下書きは、このブラウザ内に保存されます。</footer>
