@@ -1,110 +1,164 @@
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#09090b">
-    <title>Lyric SRT Studio</title>
-    <link rel="stylesheet" href="styles.css">
-  </head>
-  <body>
-    <main class="shell">
-      <nav class="studio-bar" aria-label="アプリ情報">
-        <a class="studio-brand" href="#" aria-label="Lyric SRT Studio トップ"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span><b>LYRIC SRT</b><small>STUDIO</small></span></a>
-        <div class="privacy-badge"><span aria-hidden="true">●</span> LOCAL SESSION</div>
-      </nav>
-      <header class="hero">
-        <div>
-          <p class="eyebrow">SUBTITLE TIMING WORKSPACE</p>
-          <h1>音に、言葉の<br><em>居場所をつくる。</em></h1>
-          <p class="intro">曲を再生し、歌詞行をタップして開始時刻を記録。日本語・English・日英併記の SRT を、端末内だけで仕上げます。</p>
-        </div>
-        <div class="hero-meter" aria-hidden="true"><span>01</span><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><small>READY TO CREATE</small></div>
-      </header>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b0f">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="曲に合わせて歌詞の開始・終了時刻を記録し、日本語・英語・日英併記のSRTを端末内だけで作成します。">
+  <title>Lyric SRT Studio — 歌詞字幕を、音に合わせて。</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#top" aria-label="Lyric SRT Studio トップ">
+      <span class="brand-signal" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <span><strong>LYRIC SRT</strong><small>STUDIO</small></span>
+    </a>
+    <div class="header-actions">
+      <span class="local-chip"><i></i> 端末内で処理</span>
+      <button id="new-project" class="button ghost" type="button">新規</button>
+      <button id="open-project" class="button ghost" type="button">プロジェクトを開く</button>
+      <input id="project-file" type="file" accept="application/json,.json,.lyricsrt" hidden>
+      <button id="save-project" class="button secondary" type="button">プロジェクトを保存</button>
+    </div>
+  </header>
 
-      <section class="panel playback" aria-label="再生と記録">
-        <div class="panel-heading"><span class="step-number">01</span><div><p class="eyebrow">AUDIO WORKSPACE</p><h2>曲を読み込む</h2></div><span class="panel-state">LOCAL AUDIO</span></div>
-        <label class="file-picker" for="media-file"><span>＋ 曲を選ぶ</span><input id="media-file" type="file"></label>
-        <span id="media-name">まだ曲を選んでいません</span>
-        <audio id="player" controls preload="auto" playsinline></audio>
-        <div class="seek"><output id="current-time">00:00.0</output><input id="progress" type="range" min="0" max="100" value="0" step="1"></div>
+  <main id="top" class="app-shell">
+    <section class="intro-card">
+      <div>
+        <div class="intro-eyebrow"><p class="kicker">LYRIC SUBTITLE WORKSPACE</p><span class="version-tag">SESSION / 02</span></div>
+        <h1>歌詞字幕を、<br><em>音に合わせて。</em></h1>
+        <p>歌い始めに合わせてボタンを押すだけ。終了時刻は自動でつながり、必要な行だけ細かく調整できます。</p>
+        <div class="session-chips" aria-label="セッション情報">
+          <span><i class="session-led"></i>LOCAL SESSION</span>
+          <span id="session-duration">--:--.---</span>
+          <span id="session-lines">0 LINES</span>
+        </div>
+      </div>
+      <div class="project-meta">
+        <label for="project-title">プロジェクト名</label>
+        <input id="project-title" type="text" maxlength="80" placeholder="無題のプロジェクト">
+        <span id="save-state" class="save-state">この端末に自動保存します</span>
+      </div>
+    </section>
+
+    <nav class="workflow" aria-label="作業手順">
+      <a href="#prepare"><b>1</b><span>準備<small>曲と歌詞</small></span></a>
+      <a href="#lyrics-timing"><b>2</b><span>タイミング<small>開始・終了</small></span></a>
+      <a href="#check"><b>3</b><span>確認<small>プレビュー</small></span></a>
+      <a href="#export"><b>4</b><span>書き出し<small>SRT</small></span></a>
+    </nav>
+
+    <section id="prepare" class="panel prepare-panel">
+      <div class="section-heading">
+        <span class="step">01</span>
+        <div><p class="kicker">PREPARE</p><h2>曲と歌詞を準備</h2><p>音源と歌詞は外部へ送信されません。</p></div>
+      </div>
+      <div class="prepare-grid">
+        <div id="audio-drop" class="audio-drop">
+          <div class="drop-icon" aria-hidden="true">♫</div>
+          <div><strong id="media-name">曲を選択してください</strong><small>MP3 / M4A / WAV / MP4 など</small></div>
+          <label class="button primary" for="media-file">曲を選ぶ<input id="media-file" type="file" accept="audio/*,video/mp4,.m4a,.mov" hidden></label>
+          <span class="drop-hint">またはファイルをここへドロップ</span>
+        </div>
+        <details class="lyrics-import" open>
+          <summary><span><strong>歌詞をまとめて貼り付け</strong><small>1行が1つの字幕になります</small></span><span class="summary-action">開閉</span></summary>
+          <div class="bulk-inputs">
+            <label><span>日本語歌詞</span><textarea id="bulk-jp" placeholder="1行目の歌詞&#10;2行目の歌詞&#10;3行目の歌詞"></textarea></label>
+            <label><span>English lyrics <i>任意</i></span><textarea id="bulk-en" placeholder="First line&#10;Second line&#10;Third line"></textarea></label>
+          </div>
+          <div class="import-footer"><span id="draft-line-count">0 行を検出</span><button id="apply-lyrics" class="button secondary" type="button">歌詞一覧に反映</button></div>
+        </details>
+      </div>
+    </section>
+
+    <section id="studio" class="studio-console" aria-label="再生と字幕プレビュー">
+      <section class="panel player-panel">
+        <div class="now-row">
+          <div><p class="kicker">NOW PLAYING</p><strong id="now-file">曲が未選択です</strong></div>
+          <div class="time-display"><output id="current-time">00:00.000</output><span>/</span><output id="duration-time">--:--.---</output></div>
+        </div>
+        <audio id="player" preload="auto" playsinline></audio>
         <div class="waveform-wrap">
           <canvas id="waveform" aria-label="曲の波形。押した位置へ移動できます"></canvas>
-          <p id="waveform-status">曲を選ぶと、ここに波形を表示します。</p>
+          <p id="waveform-status">曲を選ぶと波形が表示されます</p>
+          <div id="waveform-playhead" aria-hidden="true"></div>
         </div>
-        <section class="subtitle-timeline-panel" aria-label="字幕タイムライン">
-          <div class="timeline-heading">
-            <div><span class="timeline-kicker">SUBTITLE TIMELINE</span><strong>歌詞の配置</strong></div>
-            <span id="timeline-count">0 / 0 行を記録</span>
-          </div>
-          <div id="timeline-viewport" class="timeline-viewport">
-            <div id="timeline-track" class="timeline-track">
-              <div id="timeline-ruler" class="timeline-ruler" aria-hidden="true"></div>
-              <div id="timeline-blocks" class="timeline-blocks"></div>
-              <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"><span></span></div>
-              <p id="timeline-empty">時刻を記録すると、歌詞がここに並びます。</p>
-            </div>
-          </div>
-          <p class="timeline-help">歌詞ブロックを押すと、その行と再生位置へ移動します。横にスライドして曲全体を確認できます。</p>
-        </section>
-        <section class="subtitle-preview-panel" aria-label="字幕プレビュー">
-          <div class="preview-heading">
-            <div><span class="timeline-kicker">LIVE PREVIEW</span><strong>字幕プレビュー</strong></div>
-            <div class="preview-modes" aria-label="プレビュー言語">
-              <button type="button" data-preview-mode="jp">日本語</button>
-              <button type="button" data-preview-mode="en">English</button>
-              <button class="selected" type="button" data-preview-mode="bilingual">日英</button>
-            </div>
-          </div>
-          <div class="preview-stage">
-            <p id="preview-placeholder">曲を再生すると、ここに完成時の字幕が表示されます。</p>
-            <div id="preview-subtitle" hidden><strong id="preview-jp"></strong><span id="preview-en"></span></div>
-          </div>
-        </section>
-        <button id="capture-active" class="capture" type="button">● 今の時刻を記録 <kbd>Space</kbd></button>
-        <p id="status" class="status" role="status">歌詞を入れ、曲を選んで再生してください。</p>
-      </section>
-
-      <section class="panel lyrics" aria-label="歌詞行">
-        <div class="panel-heading"><span class="step-number">02</span><div><p class="eyebrow">LYRIC EDITOR</p><h2>歌詞とタイミング</h2></div><span class="panel-state">TAP TO SYNC</span></div>
-        <div class="section-title"><div><p class="eyebrow">LYRICS</p><h2>歌詞をまとめて貼り付ける</h2></div></div>
-        <div class="bulk-inputs">
-          <label><span>日本語歌詞（1行＝1字幕）</span><textarea id="bulk-jp" placeholder="歌詞をここへまとめて貼り付け&#10;1行目&#10;2行目&#10;3行目"></textarea></label>
-          <label><span>English lyrics（任意・行の順番を対応）</span><textarea id="bulk-en" placeholder="Paste English lyrics here&#10;Line one&#10;Line two&#10;Line three"></textarea></label>
+        <input id="progress" class="sr-range" type="range" min="0" max="100" value="0" step="1" aria-label="再生位置">
+        <div class="transport">
+          <button id="rewind-3" type="button" aria-label="3秒戻る"><kbd>J</kbd><span>−3s</span></button>
+          <button id="play-toggle" class="play-button" type="button" aria-label="再生"><span id="play-icon">▶</span><kbd>K</kbd></button>
+          <button id="forward-3" type="button" aria-label="3秒進む"><span>+3s</span><kbd>L</kbd></button>
+          <div class="speed" aria-label="再生速度"><button data-rate="0.5" type="button">0.5×</button><button data-rate="0.75" type="button">0.75×</button><button class="selected" data-rate="1" type="button">1×</button></div>
         </div>
-        <button id="apply-lyrics" class="apply-lyrics" type="button">歌詞を反映して一覧を作る</button>
-        <div class="section-title line-title"><div><p class="eyebrow">LYRIC LINES</p><h2>タイミングを記録 <span id="line-count"></span></h2></div><button id="add-line" type="button">＋ 行を追加</button></div>
-        <div class="legend"><span>曲を再生し、歌詞の行を押すだけで現在時刻を記録します。</span><span>再生中は Space / Enter でも、選択行を記録できます。</span></div>
-        <aside class="timing-console" aria-label="タイミング操作盤">
-          <div class="next-line"><span>次に記録する行 <b id="focus-number"></b></span><strong id="focus-jp">歌詞を入力してください</strong><small id="focus-en"></small></div>
-          <div class="transport-tools">
-            <button id="rewind-3" type="button">↶ 3秒戻る</button>
-            <button id="undo-capture" type="button" disabled>↶ 元に戻す</button>
-            <button id="redo-capture" type="button" disabled>↷ やり直す</button>
-            <button id="locate-active" type="button">選択行を見る</button>
-            <div class="speed" aria-label="再生速度">
-              <span>速度</span><button type="button" data-rate="0.5">0.5</button><button type="button" data-rate="0.75">0.75</button><button class="selected" type="button" data-rate="1">1.0</button>
-            </div>
-          </div>
-          <button id="capture-console" class="capture console-capture" type="button">● この行を記録して次へ</button>
-        </aside>
-        <div id="rows"></div>
-        <button id="clear-times" class="quiet" type="button">記録時刻をすべて消去</button>
       </section>
 
-      <section class="panel quality" aria-label="完成度チェック">
-        <div class="quality-heading"><div class="quality-title"><span class="step-number">03</span><div><p class="eyebrow">QUALITY CHECK</p><h2>完成度チェック</h2></div></div><strong id="quality-score">0 / 0 行</strong></div>
-        <div id="quality-summary" class="quality-summary">歌詞と時刻を確認しています。</div>
-        <div id="quality-issues" class="quality-issues"></div>
+      <section class="panel preview-panel">
+        <div class="section-heading compact">
+          <span class="live-badge">LIVE</span>
+          <div><p class="kicker">PREVIEW</p><h2>字幕プレビュー</h2></div>
+          <div class="segmented" aria-label="プレビュー言語"><button data-preview-mode="jp" type="button">日本語</button><button data-preview-mode="en" type="button">English</button><button class="selected" data-preview-mode="bilingual" type="button">日英</button></div>
+        </div>
+        <div class="preview-stage">
+          <span class="safe-area" aria-hidden="true"></span>
+          <p id="preview-placeholder">再生位置の字幕がここに表示されます</p>
+          <div id="preview-subtitle" hidden><strong id="preview-jp"></strong><span id="preview-en"></span></div>
+        </div>
       </section>
 
-      <section class="panel export" aria-label="SRT書き出し">
-        <div class="export-copy"><span class="step-number">04</span><div><p class="eyebrow">EXPORT</p><h2>字幕ファイルを書き出す</h2><p>最後の行は曲の終わりまで表示されます。記録時刻は上から順に入れてください。</p></div></div>
-        <div class="export-buttons"><button id="export-jp" type="button">日本語 SRT</button><button id="export-en" type="button">English SRT</button><button id="export-bilingual" class="primary" type="button">日英併記 SRT</button></div>
-      </section>
-      <footer>ファイルはアップロードされません。歌詞の下書きは、このブラウザ内に保存されます。</footer>
-    </main>
-    <div id="undo-toast" class="undo-toast" role="status" hidden><span id="undo-toast-message"></span><button id="undo-toast-button" type="button">元に戻す</button></div>
-    <script defer src="app.js"></script>
-  </body>
+      <aside class="timing-dock" aria-label="タイミング操作">
+        <div class="dock-progress"><span>記録済み</span><strong id="recorded-count">0 / 0</strong><div><i id="recorded-bar"></i></div></div>
+        <div class="next-caption"><span>次の歌詞 <b id="focus-number"></b></span><strong id="focus-jp">歌詞を入力してください</strong><small id="focus-en"></small></div>
+        <button id="capture-active" class="capture-button" type="button"><span>この位置で</span><strong>開始を記録</strong><kbd>Space</kbd></button>
+        <div class="shortcut-strip" aria-label="キーボードショートカット"><span><kbd>J</kbd>戻る</span><span><kbd>K</kbd>再生</span><span><kbd>L</kbd>進む</span><span><kbd>E</kbd>終了</span></div>
+        <div class="dock-actions">
+          <button id="undo-capture" type="button" disabled>↶ 元に戻す</button>
+          <button id="redo-capture" type="button" disabled>↷ やり直す</button>
+        </div>
+        <p id="status" class="status" role="status">曲と歌詞を準備してください。</p>
+      </aside>
+    </section>
+
+    <section id="lyrics-timing" class="panel editor-panel">
+      <div class="section-heading compact">
+        <span class="step">02</span>
+        <div><p class="kicker">TIMING</p><h2>歌詞のタイミング</h2><p>再生しながら「開始を記録」。終了は次の行まで自動でつながります。</p></div>
+        <div class="editor-heading-actions"><button id="go-next-unrecorded" class="button ghost" type="button">次の未記録行</button><button id="add-line" class="button ghost" type="button">＋ 行を追加</button><button id="clear-all-times" class="button ghost danger-action" type="button">時刻を全消去</button></div>
+      </div>
+      <div id="rows" class="lyric-rows"></div>
+    </section>
+
+    <section id="check" class="panel quality-panel final-quality">
+      <div class="quality-head"><div class="quality-title"><span class="step">03</span><div><p class="kicker">QUALITY CHECK</p><h2>完成度チェック</h2></div></div><strong id="quality-score">0 / 0</strong></div>
+      <div id="quality-summary" class="quality-summary">歌詞と時刻を確認しています。</div>
+      <div id="quality-issues" class="quality-issues"></div>
+    </section>
+
+    <section id="export" class="panel export-panel">
+      <div class="export-copy">
+        <span class="step">04</span>
+        <div><p class="kicker">EXPORT</p><h2>SRTを書き出す</h2><p>開始時刻が記録された行を書き出します。終了時刻が未指定なら、次の字幕の直前まで自動設定されます。</p></div>
+      </div>
+      <div class="export-actions">
+        <label class="bom-option"><input id="include-bom" type="checkbox" checked><span>UTF-8 BOMを付ける<small>Windows・一部編集ソフトとの互換性を高めます</small></span></label>
+        <div class="export-buttons"><button id="export-jp" class="button secondary" type="button">日本語 SRT</button><button id="export-en" class="button secondary" type="button">English SRT</button><button id="export-bilingual" class="button primary" type="button">日英併記 SRT</button></div>
+      </div>
+    </section>
+
+    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.1</small></footer>
+  </main>
+
+  <nav id="quick-nav" class="quick-nav" aria-label="歌詞一覧の移動" hidden>
+    <button id="jump-studio" type="button"><b>↑</b><span>プレイヤー</span></button>
+    <button id="jump-active" type="button"><b>●</b><span>選択行</span></button>
+    <button id="jump-next" type="button"><b>↓</b><span>未記録</span></button>
+  </nav>
+  <button id="capture-floating" class="capture-floating" type="button" hidden>
+    <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
+  </button>
+  <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button id="toast-action" type="button" hidden>元に戻す</button></div>
+  <script defer src="srt-core.js"></script>
+  <script defer src="app.js"></script>
+</body>
 </html>
