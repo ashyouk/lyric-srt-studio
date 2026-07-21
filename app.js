@@ -346,7 +346,8 @@ function scrollToActiveLine() {
 
 function updateQuickNav() {
   const timingSection = $("#lyrics-timing");
-  $("#quick-nav").hidden = !state.lines.length || globalThis.scrollY < timingSection.offsetTop - 180;
+  const mobileLayout = globalThis.innerWidth <= 980;
+  $("#quick-nav").hidden = !state.lines.length || (!mobileLayout && globalThis.scrollY < timingSection.offsetTop - 180);
   const studio = $("#studio");
   $("#capture-floating").hidden = !state.lines.length
     || globalThis.innerWidth <= 980
@@ -418,8 +419,16 @@ function updateFocus() {
   $("#session-lines").textContent = `${state.lines.length} LINES`;
   $("#session-duration").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
   $("#duration-time").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
-  $("#undo-capture").disabled = !state.history.length;
-  $("#redo-capture").disabled = !state.future.length;
+  const undoButton = $("#undo-capture");
+  const redoButton = $("#redo-capture");
+  const undoChange = state.history[state.history.length - 1];
+  const redoChange = state.future[state.future.length - 1];
+  undoButton.disabled = !undoChange;
+  redoButton.disabled = !redoChange;
+  undoButton.textContent = undoChange ? `↶ 戻す ${state.history.length}` : "↶ 戻す";
+  redoButton.textContent = redoChange ? `↷ やり直す ${state.future.length}` : "↷ やり直す";
+  undoButton.title = undoChange ? `${undoChange.label}を元に戻す（残り${state.history.length}件）` : "元に戻せる操作はありません";
+  redoButton.title = redoChange ? `${redoChange.label}をやり直す（残り${state.future.length}件）` : "やり直せる操作はありません";
 }
 
 function renderQuality(report = analyzeProject(state.lines, state.duration)) {
@@ -652,9 +661,10 @@ $("#play-toggle").onclick = togglePlayback;
 $("#export-jp").onclick = () => downloadSrt("jp");
 $("#export-en").onclick = () => downloadSrt("en");
 $("#export-bilingual").onclick = () => downloadSrt("bilingual");
-$("#jump-studio").onclick = () => $("#studio").scrollIntoView({ behavior: "smooth", block: "start" });
+$("#jump-studio").onclick = () => $("#top").scrollIntoView({ behavior: "smooth", block: "start" });
 $("#jump-active").onclick = scrollToActiveLine;
 $("#jump-next").onclick = goToNextUnrecorded;
+$("#jump-bottom").onclick = () => $("#export").scrollIntoView({ behavior: "smooth", block: "start" });
 
 document.querySelectorAll("[data-rate]").forEach((button) => { button.onclick = () => {
   player.playbackRate = Number(button.dataset.rate);
