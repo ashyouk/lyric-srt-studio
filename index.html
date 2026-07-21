@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="曲に合わせて歌詞の開始・終了時刻を記録し、日本語・英語・日英併記のSRTを端末内だけで作成します。">
   <title>Lyric SRT Studio — 歌詞字幕を、音に合わせて。</title>
-  <link rel="stylesheet" href="styles.css?v=2.1.1">
+  <link rel="stylesheet" href="styles.css?v=2.1.2">
 </head>
 <body>
   <header class="app-header">
@@ -146,19 +146,20 @@
       </div>
     </section>
 
-    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.1</small></footer>
+    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.1.2</small></footer>
   </main>
 
-  <nav id="quick-nav" class="quick-nav" aria-label="歌詞一覧の移動" hidden>
-    <button id="jump-studio" type="button"><b>↑</b><span>プレイヤー</span></button>
-    <button id="jump-active" type="button"><b>●</b><span>選択行</span></button>
-    <button id="jump-next" type="button"><b>↓</b><span>未記録</span></button>
+  <nav id="quick-nav" class="quick-nav" aria-label="ページ内の移動" hidden>
+    <button id="jump-studio" type="button" aria-label="ページ上部へ移動"><b>↑</b><span>上へ</span></button>
+    <button id="jump-active" type="button" aria-label="選択中の歌詞へ移動"><b>●</b><span>選択行</span></button>
+    <button id="jump-next" type="button" aria-label="次の未記録行へ移動"><b>○</b><span>未記録</span></button>
+    <button id="jump-bottom" type="button" aria-label="ページ下部へ移動"><b>↓</b><span>下へ</span></button>
   </nav>
   <button id="capture-floating" class="capture-floating" type="button" hidden>
     <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
   </button>
   <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button id="toast-action" type="button" hidden>元に戻す</button></div>
-  <script defer src="srt-core.js?v=2.1.1"></script>
-  <script defer src="app.js?v=2.1.1"></script>
+  <script defer src="srt-core.js?v=2.1.2"></script>
+  <script defer src="app.js?v=2.1.2"></script>
 </body>
 </html>

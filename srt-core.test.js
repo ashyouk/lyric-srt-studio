@@ -12,6 +12,17 @@ test("loads as classic scripts without global declaration collisions", () => {
   vm.runInContext(readFileSync(new URL("./srt-core.js", import.meta.url), "utf8"), context);
   vm.runInContext('const { analyzeProject, isTime } = globalThis.LyricSrtCore; if (!analyzeProject || !isTime) throw new Error("Core unavailable");', context);
 });
+test("mobile editing controls expose labeled navigation and multi-step history", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  ["上へ", "選択行", "未記録", "下へ"].forEach((label) => assert.match(html, new RegExp(`<span>${label}</span>`)));
+  assert.match(app, /state\.history\[state\.history\.length - 1\]/);
+  assert.match(app, /state\.future\[state\.future\.length - 1\]/);
+  assert.match(app, /戻す \$\{state\.history\.length\}/);
+  assert.match(app, /やり直す \$\{state\.future\.length\}/);
+  assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 1;/);
+});
 test("formats SRT timestamps", () => assert.equal(formatSrtTime(3661.007), "01:01:01,007"));
 test("auto end uses next start minus a gap", () => assert.equal(resolveEnd(lines, 0, 8), 3.98));
 test("manual end overrides automatic timing", () => assert.equal(resolveEnd([{ jp: "A", start: 1, end: 2.5 }], 0, 10), 2.5));
