@@ -1,4 +1,12 @@
-export function formatSrtTime(seconds) {
+(() => {
+const MIN_DURATION = 0.25;
+const AUTO_GAP = 0.02;
+
+function isTime(value) {
+  return value !== null && value !== "" && Number.isFinite(Number(value));
+}
+
+function formatSrtTime(seconds) {
   const totalMs = Math.max(0, Math.round(Number(seconds || 0) * 1000));
   const hours = Math.floor(totalMs / 3_600_000);
   const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
@@ -7,69 +15,75 @@ export function formatSrtTime(seconds) {
   return [hours, minutes, secs].map((part) => String(part).padStart(2, "0")).join(":") + "," + String(ms).padStart(3, "0");
 }
 
-export function preparedLines(lines, language) {
-  return lines
-    .map((line) => ({ ...line, text: language === "bilingual" ? [line.jp, line.en].filter(Boolean).join("\n") : line[language] }))
-    .filter((line) => line.text && line.start !== null && line.start !== "" && Number.isFinite(Number(line.start)));
+function resolveEnd(lines, index, duration = 0) {
+  const line = lines[index];
+  if (!line || !isTime(line.start)) return null;
+  const start = Number(line.start);
+  if (isTime(line.end) && Number(line.end) > start) return Number(line.end);
+  const next = lines.slice(index + 1).find((candidate) => isTime(candidate.start) && Number(candidate.start) > start);
+  if (next) return Math.max(start + MIN_DURATION, Number(next.start) - AUTO_GAP);
+  if (Number(duration) > start) return Math.max(start + MIN_DURATION, Number(duration));
+  return start + 3;
 }
 
-export function validateLines(lines) {
-  const timed = lines.filter((line) => line.start !== null && line.start !== "" && Number.isFinite(Number(line.start)));
+function lineText(line, language) {
+  if (language === "bilingual") return [line.jp, line.en].map((text) => String(text || "").trim()).filter(Boolean).join("\n");
+  return String(line[language] || "").trim();
+}
+
+function validateLines(lines, duration = 0) {
   const errors = [];
-  for (let index = 1; index < timed.length; index += 1) {
-    if (Number(timed[index].start) <= Number(timed[index - 1].start)) {
-      errors.push("開始時刻は上から順に、前の行より後にしてください。");
-      break;
-    }
-  }
+  let previousStart = null;
+  lines.forEach((line, index) => {
+    if (!isTime(line.start)) return;
+    const start = Number(line.start);
+    if (previousStart !== null && start <= previousStart) errors.push(`${index + 1}行目の開始時刻が前の行以前になっています。`);
+    if (isTime(line.end) && Number(line.end) <= start) errors.push(`${index + 1}行目の終了時刻は開始時刻より後にしてください。`);
+    if (duration > 0 && (start > duration || (isTime(line.end) && Number(line.end) > duration))) errors.push(`${index + 1}行目の時刻が曲の長さを超えています。`);
+    previousStart = start;
+  });
   return errors;
 }
 
-export function makeSrt(lines, language, duration = 0) {
-  const selected = preparedLines(lines, language);
+function makeSrt(lines, language, duration = 0) {
+  if (validateLines(lines, duration).length) return "";
+  const selected = lines.map((line, index) => ({ line, index, text: lineText(line, language) })).filter(({ line, text }) => text && isTime(line.start));
   if (!selected.length) return "";
-
-  return selected.map((line, index) => {
-    const start = Number(line.start);
-    const hasNextLine = index < selected.length - 1;
-    const nextStart = hasNextLine ? Number(selected[index + 1].start) : Number(duration || 0);
-    const end = Math.max(start + 0.25, nextStart > start ? (hasNextLine ? nextStart - 0.02 : nextStart) : start + 3);
-    return `${index + 1}\n${formatSrtTime(start)} --> ${formatSrtTime(end)}\n${line.text}`;
-  }).join("\n\n") + "\n";
+  return selected.map(({ line, index, text }, outputIndex) => `${outputIndex + 1}\n${formatSrtTime(line.start)} --> ${formatSrtTime(resolveEnd(lines, index, duration))}\n${text}`).join("\n\n") + "\n";
 }
 
-export function analyzeProject(lines, duration = 0) {
+function analyzeProject(lines, duration = 0) {
   const issues = [];
   const hasJapanese = lines.some((line) => String(line.jp || "").trim());
   const hasEnglish = lines.some((line) => String(line.en || "").trim());
-  const starts = lines.map((line) => line.start === null || line.start === "" ? null : Number(line.start));
-
-  let previousTimed = null;
+  let previousStart = null;
   lines.forEach((line, index) => {
     const jp = String(line.jp || "").trim();
     const en = String(line.en || "").trim();
-    const start = starts[index];
     if (!jp && !en) issues.push({ index, severity: "error", code: "empty", message: "歌詞が空欄です。" });
-    if (start === null || !Number.isFinite(start)) issues.push({ index, severity: "error", code: "unrecorded", message: "開始時刻が未記録です。" });
-    if (start !== null && Number.isFinite(start) && (start < 0 || (duration > 0 && start > duration))) issues.push({ index, severity: "error", code: "range", message: "開始時刻が曲の範囲外です。" });
+    if (!isTime(line.start)) issues.push({ index, severity: "error", code: "unrecorded", message: "開始時刻が未記録です。" });
     if (hasJapanese && hasEnglish && (!jp || !en)) issues.push({ index, severity: "warning", code: "language", message: `${!jp ? "日本語" : "English"} が空欄です。` });
-    if (start !== null && Number.isFinite(start)) {
-      if (previousTimed !== null && start <= previousTimed) issues.push({ index, severity: "error", code: "order", message: "前の記録済み行より後の時刻にしてください。" });
-      previousTimed = start;
+    if (jp.length > 42 || en.length > 58) issues.push({ index, severity: "warning", code: "long-text", message: "1字幕の文字数が多めです。読みやすさを確認してください。" });
+    if (!isTime(line.start)) return;
+    const start = Number(line.start);
+    if (start < 0 || (duration > 0 && start > duration)) issues.push({ index, severity: "error", code: "range", message: "開始時刻が曲の範囲外です。" });
+    if (previousStart !== null && start <= previousStart) issues.push({ index, severity: "error", code: "order", message: "前の記録済み行より後の時刻にしてください。" });
+    previousStart = start;
+    if (isTime(line.end)) {
+      const end = Number(line.end);
+      if (end <= start) issues.push({ index, severity: "error", code: "end-order", message: "終了時刻は開始時刻より後にしてください。" });
+      if (duration > 0 && end > duration) issues.push({ index, severity: "error", code: "end-range", message: "終了時刻が曲の範囲外です。" });
+      const next = lines.slice(index + 1).find((candidate) => isTime(candidate.start));
+      if (next && end > Number(next.start)) issues.push({ index, severity: "warning", code: "overlap", message: "次の字幕と表示時間が重なっています。" });
     }
+    const span = resolveEnd(lines, index, duration) - start;
+    if (span < .5) issues.push({ index, severity: "warning", code: "short", message: `表示時間が短めです（${span.toFixed(2)}秒）。` });
+    if (span > 15) issues.push({ index, severity: "warning", code: "long", message: `表示時間が長めです（${span.toFixed(1)}秒）。終了時刻の指定をおすすめします。` });
   });
-
-  lines.forEach((line, index) => {
-    const start = starts[index];
-    if (start === null || !Number.isFinite(start)) return;
-    const next = index < lines.length - 1 ? starts[index + 1] : (duration > start ? duration : null);
-    if (next === null || !Number.isFinite(next) || next <= start) return;
-    const span = next - start;
-    if (span < .5) issues.push({ index, severity: "warning", code: "short", message: `表示時間が短すぎます（${span.toFixed(2)}秒）。` });
-    if (span > 15) issues.push({ index, severity: "warning", code: "long", message: `表示時間が長めです（${span.toFixed(1)}秒）。` });
-  });
-
   const errorLines = new Set(issues.filter((issue) => issue.severity === "error").map((issue) => issue.index));
-  const readyCount = lines.filter((line, index) => !errorLines.has(index) && (line.jp || line.en) && starts[index] !== null).length;
+  const readyCount = lines.filter((line, index) => !errorLines.has(index) && (line.jp || line.en) && isTime(line.start)).length;
   return { issues, readyCount, total: lines.length, errors: issues.filter((issue) => issue.severity === "error").length, warnings: issues.filter((issue) => issue.severity === "warning").length };
 }
+
+globalThis.LyricSrtCore = { analyzeProject, formatSrtTime, isTime, lineText, makeSrt, resolveEnd, validateLines };
+})();
