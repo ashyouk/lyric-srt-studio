@@ -23,6 +23,14 @@ test("mobile editing controls expose labeled navigation and multi-step history",
   assert.match(app, /やり直す \$\{state\.future\.length\}/);
   assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 1;/);
 });
+test("media picker defers format validation until after file selection", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const mediaInput = html.match(/<input id="media-file"[^>]*>/)?.[0];
+  assert.ok(mediaInput);
+  assert.doesNotMatch(mediaInput, /\saccept=/);
+  assert.match(app, /\$\("#media-file"\)\.addEventListener\("change", \(event\) => \{[\s\S]*?event\.target\.value = "";[\s\S]*?loadMedia\(file\);[\s\S]*?\}\);/);
+});
 test("formats SRT timestamps", () => assert.equal(formatSrtTime(3661.007), "01:01:01,007"));
 test("auto end uses next start minus a gap", () => assert.equal(resolveEnd(lines, 0, 8), 3.98));
 test("manual end overrides automatic timing", () => assert.equal(resolveEnd([{ jp: "A", start: 1, end: 2.5 }], 0, 10), 2.5));

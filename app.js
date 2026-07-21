@@ -625,7 +625,11 @@ function downloadSrt(language) {
   showToast("SRTを書き出しました");
 }
 
-$("#media-file").addEventListener("change", (event) => loadMedia(event.target.files[0]));
+$("#media-file").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  loadMedia(file);
+});
 const audioDrop = $("#audio-drop");
 ["dragenter", "dragover"].forEach((eventName) => audioDrop.addEventListener(eventName, (event) => {
   event.preventDefault();
