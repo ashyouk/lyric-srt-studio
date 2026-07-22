@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="曲に合わせて歌詞の開始・終了時刻を記録し、日本語・英語・日英併記のSRTを端末内だけで作成します。">
   <title>Lyric SRT Studio — 歌詞字幕を、音に合わせて。</title>
-  <link rel="stylesheet" href="styles.css?v=2.1.2">
+  <link rel="stylesheet" href="styles.css?v=2.2.0">
 </head>
 <body>
   <header class="app-header">
@@ -110,6 +110,11 @@
       <aside class="timing-dock" aria-label="タイミング操作">
         <div class="dock-progress"><span>記録済み</span><strong id="recorded-count">0 / 0</strong><div><i id="recorded-bar"></i></div></div>
         <div class="next-caption"><span>次の歌詞 <b id="focus-number"></b></span><strong id="focus-jp">歌詞を入力してください</strong><small id="focus-en"></small></div>
+        <div class="dock-mini-player" aria-label="固定再生操作">
+          <button id="dock-play-toggle" class="dock-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="dock-play-icon">▶</span><small id="dock-play-label">再生</small></button>
+          <div class="dock-media"><strong id="dock-media-name">曲が未選択です</strong><span><output id="dock-current-time">00:00.000</output><i>/</i><output id="dock-duration">--:--.---</output></span></div>
+          <button id="capture-follow" class="capture-follow enabled" type="button" aria-label="記録後の画面追従を切り替える" aria-pressed="true"><span aria-hidden="true"></span><strong>画面追従</strong><small id="capture-follow-state">ON</small></button>
+        </div>
         <button id="capture-active" class="capture-button" type="button"><span>この位置で</span><strong>開始を記録</strong><kbd>Space</kbd></button>
         <div class="shortcut-strip" aria-label="キーボードショートカット"><span><kbd>J</kbd>戻る</span><span><kbd>K</kbd>再生</span><span><kbd>L</kbd>進む</span><span><kbd>E</kbd>終了</span></div>
         <div class="dock-actions">
@@ -146,7 +151,7 @@
       </div>
     </section>
 
-    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.1.3</small></footer>
+    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.2.0</small></footer>
   </main>
 
   <nav id="quick-nav" class="quick-nav" aria-label="ページ内の移動" hidden>
@@ -155,11 +160,16 @@
     <button id="jump-next" type="button" aria-label="次の未記録行へ移動"><b>○</b><span>未記録</span></button>
     <button id="jump-bottom" type="button" aria-label="ページ下部へ移動"><b>↓</b><span>下へ</span></button>
   </nav>
-  <button id="capture-floating" class="capture-floating" type="button" hidden>
-    <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
-  </button>
+  <div id="floating-console" class="floating-console" aria-label="固定編集コンソール" hidden>
+    <button id="floating-play-toggle" class="floating-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="floating-play-icon">▶</span></button>
+    <div class="floating-media"><strong id="floating-media-name">曲が未選択です</strong><output id="floating-current-time">00:00.000</output></div>
+    <button id="floating-follow" class="floating-follow enabled" type="button" aria-label="記録後の画面追従を切り替える" aria-pressed="true"><span>追従</span><strong id="floating-follow-state">ON</strong></button>
+    <button id="capture-floating" class="capture-floating" type="button">
+      <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
+    </button>
+  </div>
   <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button id="toast-action" type="button" hidden>元に戻す</button></div>
-  <script defer src="srt-core.js?v=2.1.3"></script>
-  <script defer src="app.js?v=2.1.3"></script>
+  <script defer src="srt-core.js?v=2.2.0"></script>
+  <script defer src="app.js?v=2.2.0"></script>
 </body>
 </html>
