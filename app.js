@@ -2,12 +2,21 @@ const { analyzeProject, isTime, makeSrt, resolveEnd, validateLines } = globalThi
 
 const STORAGE_KEY = "lyric-srt-studio-v2";
 const LEGACY_KEY = "lyric-srt-studio-v1";
+const PREFERENCES_KEY = "lyric-srt-studio-preferences-v1";
 const $ = (selector) => document.querySelector(selector);
 const player = $("#player");
 const waveform = $("#waveform");
 const waveformStatus = $("#waveform-status");
 const rows = $("#rows");
 const status = $("#status");
+
+function loadFollowCapturePreference() {
+  try {
+    return JSON.parse(localStorage.getItem(PREFERENCES_KEY))?.followCapture !== false;
+  } catch {
+    return true;
+  }
+}
 
 const state = {
   projectName: "無題のプロジェクト",
@@ -22,6 +31,7 @@ const state = {
   waveform: null,
   history: [],
   future: [],
+  followCapture: loadFollowCapturePreference(),
 };
 
 let waveformFrame = null;
@@ -174,6 +184,30 @@ function setStatus(message) {
   status.textContent = message;
 }
 
+function savePreferences() {
+  try {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ followCapture: state.followCapture }));
+  } catch { /* Preferences remain available for this session. */ }
+}
+
+function updateCaptureFollowControls() {
+  [$("#capture-follow"), $("#floating-follow")].forEach((button) => {
+    button.classList.toggle("enabled", state.followCapture);
+    button.ariaPressed = String(state.followCapture);
+  });
+  $("#capture-follow-state").textContent = state.followCapture ? "ON" : "OFF";
+  $("#floating-follow-state").textContent = state.followCapture ? "ON" : "OFF";
+}
+
+function toggleCaptureFollow() {
+  state.followCapture = !state.followCapture;
+  savePreferences();
+  updateCaptureFollowControls();
+  const label = state.followCapture ? "ON" : "OFF";
+  setStatus(`記録後の画面追従を${label}にしました。`);
+  showToast(`画面追従：${label}`);
+}
+
 function showToast(message, action = null) {
   clearTimeout(toastTimer);
   $("#toast-message").textContent = message;
@@ -221,8 +255,7 @@ function pushChange(index, field, next, label) {
 
 function capture(index = state.activeIndex, field = "start") {
   if (!state.lines.length) return setStatus("先に歌詞を反映してください。");
-  const editorRect = $("#lyrics-timing").getBoundingClientRect();
-  const followActiveLine = field === "start" && editorRect.top < globalThis.innerHeight * .72 && editorRect.bottom > 120;
+  const followActiveLine = field === "start" && state.followCapture;
   const time = Number(player.currentTime.toFixed(3));
   pushChange(index, field, time, field === "start" ? "開始時刻の記録" : "終了時刻の記録");
   if (field === "start") state.activeIndex = Math.min(index + 1, state.lines.length - 1);
@@ -349,7 +382,7 @@ function updateQuickNav() {
   const mobileLayout = globalThis.innerWidth <= 980;
   $("#quick-nav").hidden = !state.lines.length || (!mobileLayout && globalThis.scrollY < timingSection.offsetTop - 180);
   const studio = $("#studio");
-  $("#capture-floating").hidden = !state.lines.length
+  $("#floating-console").hidden = !state.lines.length
     || globalThis.innerWidth <= 980
     || globalThis.scrollY < studio.offsetTop + studio.offsetHeight - 120;
   const showMobileDock = state.lines.length > 0
@@ -429,6 +462,8 @@ function updateFocus() {
   redoButton.textContent = redoChange ? `↷ やり直す ${state.future.length}` : "↷ やり直す";
   undoButton.title = undoChange ? `${undoChange.label}を元に戻す（残り${state.history.length}件）` : "元に戻せる操作はありません";
   redoButton.title = redoChange ? `${redoChange.label}をやり直す（残り${state.future.length}件）` : "やり直せる操作はありません";
+  updateDockPlayback();
+  updateCaptureFollowControls();
 }
 
 function renderQuality(report = analyzeProject(state.lines, state.duration)) {
@@ -492,7 +527,34 @@ function updatePlayhead() {
   $("#waveform-playhead").style.left = `${ratio * 100}%`;
   $("#progress").value = Math.floor(player.currentTime * 1000);
   $("#current-time").textContent = timeLabel(player.currentTime);
+  updateDockPlayback();
   updatePreview();
+}
+
+function updateDockPlayback() {
+  const mediaName = state.mediaName || "曲が未選択です";
+  const currentTime = timeLabel(player.currentTime);
+  const duration = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
+  $("#dock-media-name").textContent = mediaName;
+  $("#dock-media-name").title = mediaName;
+  $("#dock-current-time").textContent = currentTime;
+  $("#dock-duration").textContent = duration;
+  $("#floating-media-name").textContent = mediaName;
+  $("#floating-media-name").title = mediaName;
+  $("#floating-current-time").textContent = currentTime;
+}
+
+function updatePlaybackControls(isPlaying) {
+  const icon = isPlaying ? "❚❚" : "▶";
+  const label = isPlaying ? "一時停止" : "再生";
+  $("#play-icon").textContent = icon;
+  $("#dock-play-icon").textContent = icon;
+  $("#floating-play-icon").textContent = icon;
+  $("#dock-play-label").textContent = label;
+  [$("#play-toggle"), $("#dock-play-toggle"), $("#floating-play-toggle")].forEach((button) => {
+    button.ariaLabel = label;
+    button.ariaPressed = String(isPlaying);
+  });
 }
 
 async function loadWaveform(file) {
@@ -593,6 +655,7 @@ function loadMedia(sourceFile) {
   $("#now-file").textContent = file.name;
   $("#audio-drop").classList.add("has-file");
   setStatus("曲を読み込んでいます…");
+  updateDockPlayback();
   loadWaveform(file);
   saveLocal();
 }
@@ -657,11 +720,15 @@ $("#go-next-unrecorded").onclick = goToNextUnrecorded;
 $("#clear-all-times").onclick = clearAllTimes;
 $("#capture-active").onclick = () => capture();
 $("#capture-floating").onclick = () => capture();
+$("#capture-follow").onclick = toggleCaptureFollow;
+$("#floating-follow").onclick = toggleCaptureFollow;
 $("#undo-capture").onclick = undo;
 $("#redo-capture").onclick = redo;
 $("#rewind-3").onclick = () => seek(-3);
 $("#forward-3").onclick = () => seek(3);
 $("#play-toggle").onclick = togglePlayback;
+$("#dock-play-toggle").onclick = togglePlayback;
+$("#floating-play-toggle").onclick = togglePlayback;
 $("#export-jp").onclick = () => downloadSrt("jp");
 $("#export-en").onclick = () => downloadSrt("en");
 $("#export-bilingual").onclick = () => downloadSrt("bilingual");
@@ -686,13 +753,14 @@ player.addEventListener("loadedmetadata", () => {
   state.duration = Number(player.duration || 0);
   $("#progress").max = Math.floor(state.duration * 1000);
   render();
+  updateDockPlayback();
   saveLocal();
 });
 player.addEventListener("canplay", () => setStatus("準備完了。再生して、歌い始めに「開始を記録」を押してください。"));
-player.addEventListener("play", () => { $("#play-icon").textContent = "❚❚"; $("#play-toggle").ariaLabel = "一時停止"; $("#play-toggle").ariaPressed = "true"; });
-player.addEventListener("pause", () => { $("#play-icon").textContent = "▶"; $("#play-toggle").ariaLabel = "再生"; $("#play-toggle").ariaPressed = "false"; });
+player.addEventListener("play", () => updatePlaybackControls(true));
+player.addEventListener("pause", () => updatePlaybackControls(false));
 player.addEventListener("timeupdate", () => { updatePlayhead(); scheduleWaveformDraw(); });
-player.addEventListener("ended", updatePlayhead);
+player.addEventListener("ended", () => { updatePlayhead(); updatePlaybackControls(false); });
 player.addEventListener("error", () => setStatus("曲を再生できませんでした。MP3、M4A、WAVをお試しください。"));
 $("#progress").addEventListener("input", () => { player.currentTime = Number($("#progress").value) / 1000; updatePlayhead(); drawWaveform(); });
 waveform.addEventListener("click", (event) => {

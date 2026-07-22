@@ -21,7 +21,21 @@ test("mobile editing controls expose labeled navigation and multi-step history",
   assert.match(app, /state\.future\[state\.future\.length - 1\]/);
   assert.match(app, /戻す \$\{state\.history\.length\}/);
   assert.match(app, /やり直す \$\{state\.future\.length\}/);
-  assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 1;/);
+  assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 2;/);
+});
+test("fixed editing consoles expose playback and optional capture following", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  ["dock-play-toggle", "capture-follow", "floating-console", "floating-play-toggle", "floating-follow"].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`));
+  });
+  assert.match(app, /const followActiveLine = field === "start" && state\.followCapture;/);
+  assert.match(app, /localStorage\.setItem\(PREFERENCES_KEY, JSON\.stringify\(\{ followCapture: state\.followCapture \}\)\)/);
+  assert.match(app, /\$\("#dock-play-toggle"\)\.onclick = togglePlayback;/);
+  assert.match(app, /\$\("#floating-play-toggle"\)\.onclick = togglePlayback;/);
+  assert.match(css, /\.dock-mini-player \{/);
+  assert.match(css, /\.floating-console \{/);
 });
 test("media picker defers format validation until after file selection", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
