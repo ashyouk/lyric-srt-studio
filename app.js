@@ -1,23 +1,29 @@
-const { analyzeProject, isTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
+const { analyzeProject, buildTimelineBlocks, isTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
 
 const STORAGE_KEY = "lyric-srt-studio-v2";
 const LEGACY_KEY = "lyric-srt-studio-v1";
 const PREFERENCES_KEY = "lyric-srt-studio-preferences-v1";
+const EDIT_PIXELS_PER_SECOND = 32;
+const MAX_TIMELINE_WIDTH = 16000;
 const $ = (selector) => document.querySelector(selector);
 const player = $("#player");
 const waveform = $("#waveform");
 const waveformStatus = $("#waveform-status");
+const timelineViewport = $("#timeline-viewport");
+const timelineContent = $("#timeline-content");
+const timelineBlocks = $("#timeline-blocks");
 const rows = $("#rows");
 const status = $("#status");
 
-function loadFollowCapturePreference() {
+function loadPreferences() {
   try {
-    return JSON.parse(localStorage.getItem(PREFERENCES_KEY))?.followCapture !== false;
+    return JSON.parse(localStorage.getItem(PREFERENCES_KEY)) || {};
   } catch {
-    return true;
+    return {};
   }
 }
 
+const preferences = loadPreferences();
 const state = {
   projectName: "無題のプロジェクト",
   mediaName: "",
@@ -31,12 +37,15 @@ const state = {
   waveform: null,
   history: [],
   future: [],
-  followCapture: loadFollowCapturePreference(),
+  followCapture: preferences.followCapture !== false,
+  timelineMode: preferences.timelineMode === "edit" ? "edit" : "full",
 };
 
 let waveformFrame = null;
 let toastTimer = null;
 let saveTimer = null;
+let timelineFlashTimer = null;
+let recentlyRecordedId = null;
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -186,7 +195,10 @@ function setStatus(message) {
 
 function savePreferences() {
   try {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ followCapture: state.followCapture }));
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({
+      followCapture: state.followCapture,
+      timelineMode: state.timelineMode,
+    }));
   } catch { /* Preferences remain available for this session. */ }
 }
 
@@ -204,8 +216,30 @@ function toggleCaptureFollow() {
   savePreferences();
   updateCaptureFollowControls();
   const label = state.followCapture ? "ON" : "OFF";
-  setStatus(`記録後の画面追従を${label}にしました。`);
+  if (state.followCapture) followTimelineToPlayhead(true);
+  setStatus(`タイムラインの画面追従を${label}にしました。`);
   showToast(`画面追従：${label}`);
+}
+
+function updateTimelineModeControls() {
+  timelineViewport.dataset.mode = state.timelineMode;
+  document.querySelectorAll("[data-timeline-mode]").forEach((button) => {
+    const selected = button.dataset.timelineMode === state.timelineMode;
+    button.classList.toggle("selected", selected);
+    button.ariaPressed = String(selected);
+  });
+}
+
+function setTimelineMode(mode) {
+  if (!["full", "edit"].includes(mode) || state.timelineMode === mode) return;
+  state.timelineMode = mode;
+  savePreferences();
+  updateTimelineModeControls();
+  renderTimeline();
+  drawWaveform();
+  if (mode === "edit") followTimelineToPlayhead(true);
+  else timelineViewport.scrollLeft = 0;
+  setStatus(mode === "edit" ? "編集表示に切り替えました。横へ動かして細部を確認できます。" : "曲全体を表示しました。");
 }
 
 function showToast(message, action = null) {
@@ -255,12 +289,13 @@ function pushChange(index, field, next, label) {
 
 function capture(index = state.activeIndex, field = "start") {
   if (!state.lines.length) return setStatus("先に歌詞を反映してください。");
-  const followActiveLine = field === "start" && state.followCapture;
   const time = Number(player.currentTime.toFixed(3));
   pushChange(index, field, time, field === "start" ? "開始時刻の記録" : "終了時刻の記録");
+  if (field === "start") recentlyRecordedId = state.lines[index]?.id || null;
   if (field === "start") state.activeIndex = Math.min(index + 1, state.lines.length - 1);
   else state.activeIndex = index;
-  render(followActiveLine);
+  render(false);
+  if (field === "start" && state.followCapture) followTimelineToPlayhead(true);
   saveLocal();
   const kind = field === "start" ? "開始" : "終了";
   setStatus(`${index + 1}行目の${kind}を${timeLabel(time)}に記録しました。`);
@@ -392,6 +427,126 @@ function updateQuickNav() {
   document.body.classList.toggle("show-mobile-dock", showMobileDock);
 }
 
+function updateWorkflowProgress() {
+  let currentStep = 1;
+  if (state.lines.length) {
+    if (state.lines.some((line) => !isTime(line.start))) currentStep = 2;
+    else currentStep = analyzeProject(state.lines, state.duration).errors ? 3 : 4;
+  }
+  document.querySelectorAll("[data-workflow-step]").forEach((link) => {
+    const step = Number(link.dataset.workflowStep);
+    const current = step === currentStep;
+    link.classList.toggle("current", current);
+    link.classList.toggle("complete", step < currentStep);
+    if (current) link.setAttribute("aria-current", "step");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+function timelineDuration(blocks = buildTimelineBlocks(state.lines, state.duration)) {
+  const knownDuration = state.duration || state.waveform?.duration || 0;
+  if (knownDuration > 0) return knownDuration;
+  return blocks.reduce((maximum, block) => Math.max(maximum, block.end), 0);
+}
+
+function timelineWidth(duration) {
+  const viewportWidth = Math.max(1, timelineViewport.clientWidth);
+  if (state.timelineMode === "full" || !duration) return viewportWidth;
+  return Math.min(MAX_TIMELINE_WIDTH, Math.max(viewportWidth, duration * EDIT_PIXELS_PER_SECOND));
+}
+
+function renderTimeline() {
+  const blocks = buildTimelineBlocks(state.lines, state.duration);
+  const duration = timelineDuration(blocks);
+  const issueSeverity = new Map();
+  analyzeProject(state.lines, state.duration).issues.forEach((issue) => {
+    if (issue.severity === "error" || !issueSeverity.has(issue.index)) issueSeverity.set(issue.index, issue.severity);
+  });
+  const oldWidth = Math.max(1, timelineContent.getBoundingClientRect().width);
+  const scrollRatio = timelineViewport.scrollLeft / oldWidth;
+  timelineContent.style.width = `${timelineWidth(duration)}px`;
+  updateTimelineModeControls();
+  timelineBlocks.innerHTML = "";
+  $("#timeline-empty").hidden = blocks.length > 0;
+
+  blocks.forEach((block) => {
+    const line = state.lines[block.index];
+    const startRatio = duration ? Math.max(0, Math.min(1, block.start / duration)) : 0;
+    const endRatio = duration ? Math.max(startRatio, Math.min(1, block.end / duration)) : startRatio;
+    const severity = issueSeverity.get(block.index);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `timeline-block${block.index === state.activeIndex ? " selected" : ""}${block.manual ? " manual-end" : ""}${block.invalidManual ? " invalid-end" : ""}${severity ? ` has-${severity}` : ""}${line.id === recentlyRecordedId ? " just-recorded" : ""}`;
+    button.style.left = `${startRatio * 100}%`;
+    button.style.width = `${Math.max(0, endRatio - startRatio) * 100}%`;
+    button.dataset.lineIndex = String(block.index);
+    button.dataset.endSource = block.source;
+    button.title = `${block.index + 1}行目 ${timeLabel(block.start)} → ${timeLabel(block.end)}\n${line.jp || line.en || "歌詞なし"}`;
+    button.setAttribute("aria-label", `${block.index + 1}行目を選択して${timeLabel(block.start)}へ移動`);
+
+    const content = document.createElement("span");
+    content.className = "timeline-block-content";
+    const number = document.createElement("b");
+    number.textContent = String(block.index + 1).padStart(2, "0");
+    const lyric = document.createElement("strong");
+    lyric.textContent = line.jp || line.en || "歌詞なし";
+    const time = document.createElement("time");
+    time.textContent = timeLabel(block.start);
+    content.append(number, lyric, time);
+    if (isTime(line.end)) {
+      const marker = document.createElement("i");
+      marker.textContent = "◆";
+      marker.title = block.invalidManual ? "手動終了時刻にエラーがあります" : "手動終了";
+      content.append(marker);
+    }
+    button.append(content);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectTimelineBlock(block.index, block.start);
+    });
+    timelineBlocks.append(button);
+  });
+
+  if (state.timelineMode === "edit") timelineViewport.scrollLeft = scrollRatio * timelineContent.getBoundingClientRect().width;
+  else timelineViewport.scrollLeft = 0;
+
+  if (recentlyRecordedId) {
+    clearTimeout(timelineFlashTimer);
+    timelineFlashTimer = setTimeout(() => {
+      recentlyRecordedId = null;
+      timelineBlocks.querySelector(".just-recorded")?.classList.remove("just-recorded");
+    }, 760);
+  }
+}
+
+function selectTimelineBlock(index, start) {
+  state.activeIndex = Math.max(0, Math.min(index, state.lines.length - 1));
+  if (player.src) player.currentTime = Math.max(0, Math.min(state.duration || Infinity, Number(start)));
+  render(false);
+  updatePlayhead();
+  if (state.followCapture) followTimelineToPlayhead(true);
+  setStatus(player.src
+    ? `${index + 1}行目を選択し、${timeLabel(start)}へ移動しました。`
+    : `${index + 1}行目を選択しました。再生位置を確認するには曲を選び直してください。`);
+}
+
+function followTimelineToPlayhead(force = false) {
+  if (!state.followCapture || state.timelineMode !== "edit") return;
+  const duration = timelineDuration();
+  if (!duration) return;
+  const contentWidth = timelineContent.getBoundingClientRect().width;
+  const playheadX = Math.max(0, Math.min(contentWidth, player.currentTime / duration * contentWidth));
+  const viewportWidth = timelineViewport.clientWidth;
+  const left = timelineViewport.scrollLeft;
+  const leadingEdge = left + viewportWidth * .22;
+  const trailingEdge = left + viewportWidth * .78;
+  if (!force && playheadX >= leadingEdge && playheadX <= trailingEdge) return;
+  timelineViewport.scrollTo({
+    left: Math.max(0, playheadX - viewportWidth * .38),
+    behavior: force ? "smooth" : "auto",
+  });
+}
+
 function renderRows(scroll = false) {
   const report = analyzeProject(state.lines, state.duration);
   const issueByLine = new Map();
@@ -432,6 +587,7 @@ function renderRows(scroll = false) {
       state.lines[index][textarea.dataset.field] = textarea.value;
       saveLocal();
       renderQuality();
+      renderTimeline();
       updatePreview();
     }));
     rows.append(article);
@@ -449,6 +605,7 @@ function updateFocus() {
   $("#recorded-count").textContent = `${recorded} / ${state.lines.length}`;
   $("#recorded-bar").style.width = `${state.lines.length ? recorded / state.lines.length * 100 : 0}%`;
   $("#capture-floating-number").textContent = line ? `${state.activeIndex + 1} 行目` : "—";
+  $("#capture-active-context").textContent = line ? `${state.activeIndex + 1}行目を、この位置で` : "この位置で";
   $("#session-lines").textContent = `${state.lines.length} LINES`;
   $("#session-duration").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
   $("#duration-time").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
@@ -493,6 +650,8 @@ function render(scroll = false) {
   const report = renderRows(scroll);
   updateFocus();
   renderQuality(report);
+  updateWorkflowProgress();
+  renderTimeline();
   drawWaveform();
   updatePreview();
   updateQuickNav();
@@ -522,13 +681,14 @@ function updatePreview() {
 }
 
 function updatePlayhead() {
-  const duration = state.duration || state.waveform?.duration || 0;
+  const duration = timelineDuration();
   const ratio = duration ? Math.min(1, player.currentTime / duration) : 0;
   $("#waveform-playhead").style.left = `${ratio * 100}%`;
   $("#progress").value = Math.floor(player.currentTime * 1000);
   $("#current-time").textContent = timeLabel(player.currentTime);
   updateDockPlayback();
   updatePreview();
+  followTimelineToPlayhead();
 }
 
 function updateDockPlayback() {
@@ -593,16 +753,18 @@ async function loadWaveform(file) {
 function drawWaveform() {
   const rect = waveform.getBoundingClientRect();
   const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
-  const width = Math.max(1, Math.round(rect.width * dpr));
+  const renderScale = Math.min(dpr, 16384 / Math.max(1, rect.width));
+  const width = Math.max(1, Math.round(rect.width * renderScale));
   const height = Math.max(1, Math.round(rect.height * dpr));
   if (waveform.width !== width || waveform.height !== height) { waveform.width = width; waveform.height = height; }
   const context = waveform.getContext("2d");
   context.clearRect(0, 0, width, height);
   if (!state.waveform) return;
   const { peaks, duration } = state.waveform;
-  const played = duration ? player.currentTime / duration : 0;
-  const barWidth = Math.max(1, Math.round(2 * dpr));
-  const gap = Math.max(1, Math.round(2 * dpr));
+  const axisDuration = state.duration || duration;
+  const played = axisDuration ? player.currentTime / axisDuration : 0;
+  const barWidth = Math.max(1, Math.round(2 * renderScale));
+  const gap = Math.max(1, Math.round(2 * renderScale));
   for (let x = 0; x < width; x += barWidth + gap) {
     const peak = peaks[Math.min(peaks.length - 1, Math.floor(x / width * peaks.length))];
     const bar = Math.max(2 * dpr, peak * height * .72);
@@ -611,7 +773,7 @@ function drawWaveform() {
   }
   state.lines.forEach((line, index) => {
     if (!isTime(line.start)) return;
-    const x = Number(line.start) / duration * width;
+    const x = Number(line.start) / axisDuration * width;
     context.fillStyle = index === state.activeIndex ? "#ff6047" : "rgba(197,210,224,.28)";
     context.fillRect(x, 0, Math.max(1, dpr), height);
   });
@@ -749,6 +911,10 @@ document.querySelectorAll("[data-preview-mode]").forEach((button) => { button.on
   updatePreview();
 }; });
 
+document.querySelectorAll("[data-timeline-mode]").forEach((button) => {
+  button.onclick = () => setTimelineMode(button.dataset.timelineMode);
+});
+
 player.addEventListener("loadedmetadata", () => {
   state.duration = Number(player.duration || 0);
   $("#progress").max = Math.floor(state.duration * 1000);
@@ -763,16 +929,22 @@ player.addEventListener("timeupdate", () => { updatePlayhead(); scheduleWaveform
 player.addEventListener("ended", () => { updatePlayhead(); updatePlaybackControls(false); });
 player.addEventListener("error", () => setStatus("曲を再生できませんでした。MP3、M4A、WAVをお試しください。"));
 $("#progress").addEventListener("input", () => { player.currentTime = Number($("#progress").value) / 1000; updatePlayhead(); drawWaveform(); });
-waveform.addEventListener("click", (event) => {
-  const duration = state.duration || state.waveform?.duration;
+timelineContent.addEventListener("click", (event) => {
+  if (event.target.closest(".timeline-block")) return;
+  const duration = timelineDuration();
   if (!duration) return;
-  const rect = waveform.getBoundingClientRect();
+  if (!player.src) return setStatus("再生位置を移動するには曲を選び直してください。");
+  const rect = timelineContent.getBoundingClientRect();
   player.currentTime = Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration));
   updatePlayhead();
   drawWaveform();
 });
 
-globalThis.addEventListener("resize", () => { scheduleWaveformDraw(); updateQuickNav(); });
+globalThis.addEventListener("resize", () => {
+  renderTimeline();
+  scheduleWaveformDraw();
+  updateQuickNav();
+});
 globalThis.addEventListener("scroll", updateQuickNav, { passive: true });
 document.addEventListener("keydown", (event) => {
   const interactive = document.activeElement?.matches?.("input, textarea, button, summary, [contenteditable=true]");

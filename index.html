@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#090b0f">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="曲に合わせて歌詞の開始・終了時刻を記録し、日本語・英語・日英併記のSRTを端末内だけで作成します。">
-  <title>Lyric SRT Studio — 歌詞字幕を、音に合わせて。</title>
-  <link rel="stylesheet" href="styles.css?v=2.2.0">
+  <meta name="description" content="波形と字幕タイムラインを見ながら、日本語・English・日英併記のSRTを端末内だけで仕上げます。">
+  <title>Lyric SRT Studio — 音に、言葉の居場所をつくる。</title>
+  <link rel="stylesheet" href="styles.css?v=2.3.0">
 </head>
 <body>
   <header class="app-header">
@@ -27,9 +27,9 @@
   <main id="top" class="app-shell">
     <section class="intro-card">
       <div>
-        <div class="intro-eyebrow"><p class="kicker">LYRIC SUBTITLE WORKSPACE</p><span class="version-tag">SESSION / 02</span></div>
-        <h1>歌詞字幕を、<br><em>音に合わせて。</em></h1>
-        <p>歌い始めに合わせてボタンを押すだけ。終了時刻は自動でつながり、必要な行だけ細かく調整できます。</p>
+        <div class="intro-eyebrow"><p class="kicker">LYRIC SUBTITLE WORKSPACE</p><span class="version-tag">BETA CANDIDATE / 2.3.0</span></div>
+        <h1>音に、<br><em>言葉の居場所をつくる。</em></h1>
+        <p>曲を再生し、歌い始めに合わせて記録。<br>波形と字幕タイムラインを見ながら、日本語・English・日英併記のSRTを端末内だけで仕上げます。</p>
         <div class="session-chips" aria-label="セッション情報">
           <span><i class="session-led"></i>LOCAL SESSION</span>
           <span id="session-duration">--:--.---</span>
@@ -44,10 +44,10 @@
     </section>
 
     <nav class="workflow" aria-label="作業手順">
-      <a href="#prepare"><b>1</b><span>準備<small>曲と歌詞</small></span></a>
-      <a href="#lyrics-timing"><b>2</b><span>タイミング<small>開始・終了</small></span></a>
-      <a href="#check"><b>3</b><span>確認<small>プレビュー</small></span></a>
-      <a href="#export"><b>4</b><span>書き出し<small>SRT</small></span></a>
+      <a href="#prepare" data-workflow-step="1"><b>1</b><span>準備<small>曲と歌詞</small></span></a>
+      <a href="#lyrics-timing" data-workflow-step="2"><b>2</b><span>タイミング<small>開始・終了</small></span></a>
+      <a href="#check" data-workflow-step="3"><b>3</b><span>確認<small>プレビュー</small></span></a>
+      <a href="#export" data-workflow-step="4"><b>4</b><span>書き出し<small>SRT</small></span></a>
     </nav>
 
     <section id="prepare" class="panel prepare-panel">
@@ -80,10 +80,25 @@
           <div class="time-display"><output id="current-time">00:00.000</output><span>/</span><output id="duration-time">--:--.---</output></div>
         </div>
         <audio id="player" preload="auto" playsinline></audio>
-        <div class="waveform-wrap">
-          <canvas id="waveform" aria-label="曲の波形。押した位置へ移動できます"></canvas>
-          <p id="waveform-status">曲を選ぶと波形が表示されます</p>
-          <div id="waveform-playhead" aria-hidden="true"></div>
+        <div class="timeline-toolbar">
+          <div><p class="kicker">TIMELINE</p><strong>波形と字幕</strong></div>
+          <div class="segmented timeline-modes" aria-label="タイムライン表示">
+            <button class="selected" data-timeline-mode="full" type="button" aria-pressed="true">全体表示</button>
+            <button data-timeline-mode="edit" type="button" aria-pressed="false">編集表示</button>
+          </div>
+        </div>
+        <div id="timeline-viewport" class="timeline-viewport" data-mode="full">
+          <div id="timeline-content" class="timeline-content">
+            <div class="waveform-wrap">
+              <canvas id="waveform" aria-label="曲の波形。空いている位置を押すと再生位置を移動します"></canvas>
+              <p id="waveform-status">曲を選ぶと波形が表示されます</p>
+            </div>
+            <div id="subtitle-timeline" class="subtitle-timeline" aria-label="記録済み字幕タイムライン">
+              <p id="timeline-empty">曲を再生して「開始を記録」すると、<br>ここへ歌詞が配置されます。</p>
+              <div id="timeline-blocks" class="timeline-blocks"></div>
+            </div>
+            <div id="waveform-playhead" aria-hidden="true"><i></i></div>
+          </div>
         </div>
         <input id="progress" class="sr-range" type="range" min="0" max="100" value="0" step="1" aria-label="再生位置">
         <div class="transport">
@@ -113,9 +128,9 @@
         <div class="dock-mini-player" aria-label="固定再生操作">
           <button id="dock-play-toggle" class="dock-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="dock-play-icon">▶</span><small id="dock-play-label">再生</small></button>
           <div class="dock-media"><strong id="dock-media-name">曲が未選択です</strong><span><output id="dock-current-time">00:00.000</output><i>/</i><output id="dock-duration">--:--.---</output></span></div>
-          <button id="capture-follow" class="capture-follow enabled" type="button" aria-label="記録後の画面追従を切り替える" aria-pressed="true"><span aria-hidden="true"></span><strong>画面追従</strong><small id="capture-follow-state">ON</small></button>
+          <button id="capture-follow" class="capture-follow enabled" type="button" aria-label="タイムラインの画面追従を切り替える" aria-pressed="true"><span aria-hidden="true"></span><strong>画面追従</strong><small id="capture-follow-state">ON</small></button>
         </div>
-        <button id="capture-active" class="capture-button" type="button"><span>この位置で</span><strong>開始を記録</strong><kbd>Space</kbd></button>
+        <button id="capture-active" class="capture-button" type="button"><span id="capture-active-context">この位置で</span><strong>開始を記録</strong><kbd>Space</kbd></button>
         <div class="shortcut-strip" aria-label="キーボードショートカット"><span><kbd>J</kbd>戻る</span><span><kbd>K</kbd>再生</span><span><kbd>L</kbd>進む</span><span><kbd>E</kbd>終了</span></div>
         <div class="dock-actions">
           <button id="undo-capture" type="button" disabled>↶ 元に戻す</button>
@@ -151,7 +166,7 @@
       </div>
     </section>
 
-    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.2.0</small></footer>
+    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.3.0 β候補版</small></footer>
   </main>
 
   <nav id="quick-nav" class="quick-nav" aria-label="ページ内の移動" hidden>
@@ -163,13 +178,13 @@
   <div id="floating-console" class="floating-console" aria-label="固定編集コンソール" hidden>
     <button id="floating-play-toggle" class="floating-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="floating-play-icon">▶</span></button>
     <div class="floating-media"><strong id="floating-media-name">曲が未選択です</strong><output id="floating-current-time">00:00.000</output></div>
-    <button id="floating-follow" class="floating-follow enabled" type="button" aria-label="記録後の画面追従を切り替える" aria-pressed="true"><span>追従</span><strong id="floating-follow-state">ON</strong></button>
+    <button id="floating-follow" class="floating-follow enabled" type="button" aria-label="タイムラインの画面追従を切り替える" aria-pressed="true"><span>追従</span><strong id="floating-follow-state">ON</strong></button>
     <button id="capture-floating" class="capture-floating" type="button">
       <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
     </button>
   </div>
   <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button id="toast-action" type="button" hidden>元に戻す</button></div>
-  <script defer src="srt-core.js?v=2.2.0"></script>
-  <script defer src="app.js?v=2.2.0"></script>
+  <script defer src="srt-core.js?v=2.3.0"></script>
+  <script defer src="app.js?v=2.3.0"></script>
 </body>
 </html>

@@ -16,14 +16,44 @@ function formatSrtTime(seconds) {
 }
 
 function resolveEnd(lines, index, duration = 0) {
+  return resolveEndDetails(lines, index, duration)?.end ?? null;
+}
+
+function resolveEndDetails(lines, index, duration = 0) {
   const line = lines[index];
   if (!line || !isTime(line.start)) return null;
   const start = Number(line.start);
-  if (isTime(line.end) && Number(line.end) > start) return Number(line.end);
+  if (isTime(line.end) && Number(line.end) > start) {
+    return { end: Number(line.end), source: "manual", invalidManual: false };
+  }
+  const invalidManual = isTime(line.end);
   const next = lines.slice(index + 1).find((candidate) => isTime(candidate.start) && Number(candidate.start) > start);
-  if (next) return Math.max(start + MIN_DURATION, Number(next.start) - AUTO_GAP);
-  if (Number(duration) > start) return Math.max(start + MIN_DURATION, Number(duration));
-  return start + 3;
+  if (next) {
+    return {
+      end: Math.max(start + MIN_DURATION, Number(next.start) - AUTO_GAP),
+      source: "next",
+      invalidManual,
+    };
+  }
+  if (Number(duration) > start) {
+    return { end: Math.max(start + MIN_DURATION, Number(duration)), source: "duration", invalidManual };
+  }
+  return { end: start + 3, source: "fallback", invalidManual };
+}
+
+function buildTimelineBlocks(lines, duration = 0) {
+  return lines.flatMap((line, index) => {
+    if (!isTime(line.start)) return [];
+    const timing = resolveEndDetails(lines, index, duration);
+    return [{
+      index,
+      start: Number(line.start),
+      end: timing.end,
+      source: timing.source,
+      manual: timing.source === "manual",
+      invalidManual: timing.invalidManual,
+    }];
+  });
 }
 
 function lineText(line, language) {
@@ -85,5 +115,15 @@ function analyzeProject(lines, duration = 0) {
   return { issues, readyCount, total: lines.length, errors: issues.filter((issue) => issue.severity === "error").length, warnings: issues.filter((issue) => issue.severity === "warning").length };
 }
 
-globalThis.LyricSrtCore = { analyzeProject, formatSrtTime, isTime, lineText, makeSrt, resolveEnd, validateLines };
+globalThis.LyricSrtCore = {
+  analyzeProject,
+  buildTimelineBlocks,
+  formatSrtTime,
+  isTime,
+  lineText,
+  makeSrt,
+  resolveEnd,
+  resolveEndDetails,
+  validateLines,
+};
 })();
