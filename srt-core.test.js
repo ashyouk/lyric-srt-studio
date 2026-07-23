@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import "./srt-core.js";
 
-const { analyzeProject, formatSrtTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
+const { analyzeProject, buildTimelineBlocks, formatSrtTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
 
 const lines = [{ jp: "朝", en: "Morning", start: 1.2, end: null }, { jp: "夜", en: "Night", start: 4, end: null }];
 test("loads as classic scripts without global declaration collisions", () => {
@@ -30,8 +30,8 @@ test("fixed editing consoles expose playback and optional capture following", ()
   ["dock-play-toggle", "capture-follow", "floating-console", "floating-play-toggle", "floating-follow"].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
-  assert.match(app, /const followActiveLine = field === "start" && state\.followCapture;/);
-  assert.match(app, /localStorage\.setItem\(PREFERENCES_KEY, JSON\.stringify\(\{ followCapture: state\.followCapture \}\)\)/);
+  assert.match(app, /render\(false\);\s+if \(field === "start" && state\.followCapture\) followTimelineToPlayhead\(true\);/);
+  assert.match(app, /followCapture: state\.followCapture,\s+timelineMode: state\.timelineMode,/);
   assert.match(app, /\$\("#dock-play-toggle"\)\.onclick = togglePlayback;/);
   assert.match(app, /\$\("#floating-play-toggle"\)\.onclick = togglePlayback;/);
   assert.match(css, /\.dock-mini-player \{/);
@@ -44,6 +44,69 @@ test("media picker defers format validation until after file selection", () => {
   assert.ok(mediaInput);
   assert.doesNotMatch(mediaInput, /\saccept=/);
   assert.match(app, /\$\("#media-file"\)\.addEventListener\("change", \(event\) => \{[\s\S]*?event\.target\.value = "";[\s\S]*?loadMedia\(file\);[\s\S]*?\}\);/);
+});
+test("timeline creates blocks only for recorded lines", () => {
+  const blocks = buildTimelineBlocks([{ start: null }, { start: 2 }, { start: "" }, { start: 5 }], 8);
+  assert.deepEqual(blocks.map(({ index, start, end }) => ({ index, start, end })), [
+    { index: 1, start: 2, end: 4.98 },
+    { index: 3, start: 5, end: 8 },
+  ]);
+});
+test("recording the next line updates the previous timeline range", () => {
+  const source = [{ start: 1 }, { start: null }];
+  assert.equal(buildTimelineBlocks(source, 10)[0].end, 10);
+  source[1].start = 4;
+  assert.equal(buildTimelineBlocks(source, 10)[0].end, 3.98);
+});
+test("timeline manual end takes priority", () => {
+  const [block] = buildTimelineBlocks([{ start: 1, end: 2.5 }, { start: 4 }], 8);
+  assert.equal(block.end, 2.5);
+  assert.equal(block.source, "manual");
+  assert.equal(block.manual, true);
+});
+test("timeline final line reaches media duration", () => {
+  const [block] = buildTimelineBlocks([{ start: 6 }], 9.5);
+  assert.equal(block.end, 9.5);
+  assert.equal(block.source, "duration");
+});
+test("invalid manual end is flagged and safely uses automatic timing", () => {
+  const [block] = buildTimelineBlocks([{ start: 2, end: 1 }, { start: 5 }], 8);
+  assert.equal(block.end, 4.98);
+  assert.equal(block.invalidManual, true);
+  assert.equal(block.manual, false);
+});
+test("timeline UI restores, rerenders, seeks, and never captures from an empty tap", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  ["timeline-viewport", "timeline-content", "subtitle-timeline", "timeline-blocks", "timeline-empty"].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`));
+  });
+  assert.match(app, /function render\(scroll = false\) \{[\s\S]*?renderTimeline\(\);/);
+  assert.match(app, /function applyProject\([\s\S]*?render\(\);/);
+  assert.match(app, /function undo\(\) \{[\s\S]*?render\(\);/);
+  assert.match(app, /function redo\(\) \{[\s\S]*?render\(\);/);
+  assert.match(app, /function selectTimelineBlock\(index, start\) \{[\s\S]*?state\.activeIndex[\s\S]*?player\.currentTime[\s\S]*?updatePlayhead\(\);/);
+  const emptyTap = app.match(/timelineContent\.addEventListener\("click", \(event\) => \{[\s\S]*?\n\}\);/)?.[0] || "";
+  assert.match(emptyTap, /player\.currentTime =/);
+  assert.doesNotMatch(emptyTap, /\bcapture\(/);
+});
+test("capture follow stays inside the timeline instead of scrolling the page", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(captureSource, /render\(false\);/);
+  assert.match(captureSource, /followTimelineToPlayhead\(true\)/);
+  assert.doesNotMatch(captureSource, /scrollIntoView/);
+  assert.match(app, /if \(!state\.followCapture \|\| state\.timelineMode !== "edit"\) return;/);
+});
+test("timeline exposes full and edit modes plus beta candidate branding", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(html, /data-timeline-mode="full"/);
+  assert.match(html, /data-timeline-mode="edit"/);
+  assert.match(html, /音に、<br><em>言葉の居場所をつくる。<\/em>/);
+  assert.match(html, /Lyric SRT Studio v2\.3\.0 β候補版/);
+  assert.match(css, /\.timeline-block\.just-recorded/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
 test("formats SRT timestamps", () => assert.equal(formatSrtTime(3661.007), "01:01:01,007"));
 test("auto end uses next start minus a gap", () => assert.equal(resolveEnd(lines, 0, 8), 3.98));
