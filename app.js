@@ -1,4 +1,12 @@
-const { analyzeProject, buildTimelineBlocks, isTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
+const {
+  analyzeProject,
+  buildTimelineBlocks,
+  isTime,
+  lyricDraftInfo,
+  makeSrt,
+  resolveEnd,
+  validateLines,
+} = globalThis.LyricSrtCore;
 
 const STORAGE_KEY = "lyric-srt-studio-v2";
 const LEGACY_KEY = "lyric-srt-studio-v1";
@@ -121,8 +129,21 @@ function sanitizeProject(data) {
   };
 }
 
+function hasLoadedMedia() {
+  return Boolean(state.mediaUrl && player.getAttribute("src"));
+}
+
+function unloadMedia() {
+  if (state.mediaUrl) URL.revokeObjectURL(state.mediaUrl);
+  state.mediaUrl = null;
+  player.removeAttribute("src");
+  player.load();
+  updatePlaybackControls(false);
+}
+
 function applyProject(project, message = "プロジェクトを開きました。曲を選び直してください。") {
-  Object.assign(state, project, { activeIndex: 0, history: [], future: [], waveform: null });
+  unloadMedia();
+  Object.assign(state, project, { activeIndex: 0, history: [], future: [], waveform: null, mediaUrl: null });
   state.lines = project.lines.length ? project.lines : [];
   $("#project-title").value = state.projectName;
   $("#bulk-jp").value = state.jpDraft;
@@ -173,9 +194,7 @@ async function openProjectFile(file) {
 function newProject() {
   const hasWork = state.lines.some((line) => line.jp || line.en || isTime(line.start));
   if (hasWork && !confirm("現在の作業を閉じて、新しいプロジェクトを作りますか？\n必要なら先にプロジェクトを保存してください。")) return;
-  if (state.mediaUrl) URL.revokeObjectURL(state.mediaUrl);
-  player.removeAttribute("src");
-  player.load();
+  unloadMedia();
   Object.assign(state, { projectName: "無題のプロジェクト", mediaName: "", mediaUrl: null, duration: 0, lines: [], jpDraft: "", enDraft: "", activeIndex: 0, waveform: null, history: [], future: [] });
   $("#project-title").value = state.projectName;
   $("#bulk-jp").value = "";
@@ -251,28 +270,25 @@ function showToast(message, action = null) {
   toastTimer = setTimeout(() => { $("#toast").hidden = true; }, 5500);
 }
 
-function lyricLines(value) {
-  return String(value || "").replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean);
-}
-
 function updateDraftCount() {
-  const count = Math.max(lyricLines($("#bulk-jp").value).length, lyricLines($("#bulk-en").value).length);
-  $("#draft-line-count").textContent = `${count} 行を検出`;
+  const draft = lyricDraftInfo($("#bulk-jp").value, $("#bulk-en").value);
+  $("#draft-line-count").textContent = `${draft.rows.length} 行を検出`;
 }
 
 function applyLyrics() {
-  const jp = lyricLines($("#bulk-jp").value);
-  const en = lyricLines($("#bulk-en").value);
-  const count = Math.max(jp.length, en.length);
+  const draft = lyricDraftInfo($("#bulk-jp").value, $("#bulk-en").value);
+  const count = draft.rows.length;
   if (!count) return setStatus("日本語またはEnglishの歌詞を1行ずつ貼り付けてください。");
   if (state.lines.some((line) => isTime(line.start)) && !confirm("現在のタイミング記録を置き換えて、歌詞一覧を作り直しますか？")) return;
-  state.lines = Array.from({ length: count }, (_, index) => newLine({ jp: jp[index], en: en[index] }));
+  state.lines = draft.rows.map((line) => newLine(line));
   state.activeIndex = 0;
   state.history = [];
   state.future = [];
   render();
   saveLocal();
-  setStatus(`${count}行の歌詞を反映しました。曲を再生して開始を記録してください。`);
+  setStatus(draft.lengthsDiffer
+    ? `${count}行の歌詞を反映しました。日本語とEnglishの行数が異なります。空欄になった行を確認してください。`
+    : `${count}行の歌詞を反映しました。曲を再生して開始を記録してください。`);
   $(".lyrics-import").open = false;
   $("#studio").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -289,6 +305,11 @@ function pushChange(index, field, next, label) {
 
 function capture(index = state.activeIndex, field = "start") {
   if (!state.lines.length) return setStatus("先に歌詞を反映してください。");
+  if (!hasLoadedMedia()) {
+    setStatus("先に曲を選んでください。");
+    showToast("曲が選択されていません");
+    return;
+  }
   const time = Number(player.currentTime.toFixed(3));
   pushChange(index, field, time, field === "start" ? "開始時刻の記録" : "終了時刻の記録");
   if (field === "start") recentlyRecordedId = state.lines[index]?.id || null;
@@ -521,11 +542,11 @@ function renderTimeline() {
 
 function selectTimelineBlock(index, start) {
   state.activeIndex = Math.max(0, Math.min(index, state.lines.length - 1));
-  if (player.src) player.currentTime = Math.max(0, Math.min(state.duration || Infinity, Number(start)));
+  if (hasLoadedMedia()) player.currentTime = Math.max(0, Math.min(state.duration || Infinity, Number(start)));
   render(false);
   updatePlayhead();
   if (state.followCapture) followTimelineToPlayhead(true);
-  setStatus(player.src
+  setStatus(hasLoadedMedia()
     ? `${index + 1}行目を選択し、${timeLabel(start)}へ移動しました。`
     : `${index + 1}行目を選択しました。再生位置を確認するには曲を選び直してください。`);
 }
@@ -823,7 +844,7 @@ function loadMedia(sourceFile) {
 }
 
 function togglePlayback() {
-  if (!player.src) return setStatus("先に曲を選んでください。");
+  if (!hasLoadedMedia()) return setStatus("先に曲を選んでください。");
   if (player.paused) player.play().catch(() => setStatus("再生できませんでした。別の音源形式をお試しください。"));
   else player.pause();
 }
@@ -933,7 +954,7 @@ timelineContent.addEventListener("click", (event) => {
   if (event.target.closest(".timeline-block")) return;
   const duration = timelineDuration();
   if (!duration) return;
-  if (!player.src) return setStatus("再生位置を移動するには曲を選び直してください。");
+  if (!hasLoadedMedia()) return setStatus("再生位置を移動するには曲を選び直してください。");
   const rect = timelineContent.getBoundingClientRect();
   player.currentTime = Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration));
   updatePlayhead();
