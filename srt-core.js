@@ -56,6 +56,46 @@ function buildTimelineBlocks(lines, duration = 0) {
   });
 }
 
+function lyricDraftLines(value) {
+  const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim());
+  while (lines[0] === "") lines.shift();
+  while (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+function lyricDraftInfo(jpRaw, enRaw) {
+  const jpLines = lyricDraftLines(jpRaw);
+  const enLines = lyricDraftLines(enRaw);
+  const hasJapanese = jpLines.some(Boolean);
+  const hasEnglish = enLines.some(Boolean);
+  let rows = [];
+
+  if (hasJapanese && hasEnglish) {
+    const count = Math.max(jpLines.length, enLines.length);
+    rows = Array.from({ length: count }, (_, index) => ({
+      jp: jpLines[index] || "",
+      en: enLines[index] || "",
+    })).filter((line) => line.jp || line.en);
+  } else if (hasJapanese) {
+    rows = jpLines.filter(Boolean).map((jp) => ({ jp, en: "" }));
+  } else if (hasEnglish) {
+    rows = enLines.filter(Boolean).map((en) => ({ jp: "", en }));
+  }
+
+  return {
+    rows,
+    hasJapanese,
+    hasEnglish,
+    jpLineCount: hasJapanese ? jpLines.length : 0,
+    enLineCount: hasEnglish ? enLines.length : 0,
+    lengthsDiffer: hasJapanese && hasEnglish && jpLines.length !== enLines.length,
+  };
+}
+
+function parseLyricDrafts(jpRaw, enRaw) {
+  return lyricDraftInfo(jpRaw, enRaw).rows;
+}
+
 function lineText(line, language) {
   if (language === "bilingual") return [line.jp, line.en].map((text) => String(text || "").trim()).filter(Boolean).join("\n");
   return String(line[language] || "").trim();
@@ -121,7 +161,9 @@ globalThis.LyricSrtCore = {
   formatSrtTime,
   isTime,
   lineText,
+  lyricDraftInfo,
   makeSrt,
+  parseLyricDrafts,
   resolveEnd,
   resolveEndDetails,
   validateLines,

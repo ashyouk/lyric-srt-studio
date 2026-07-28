@@ -4,7 +4,16 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import "./srt-core.js";
 
-const { analyzeProject, buildTimelineBlocks, formatSrtTime, makeSrt, resolveEnd, validateLines } = globalThis.LyricSrtCore;
+const {
+  analyzeProject,
+  buildTimelineBlocks,
+  formatSrtTime,
+  lyricDraftInfo,
+  makeSrt,
+  parseLyricDrafts,
+  resolveEnd,
+  validateLines,
+} = globalThis.LyricSrtCore;
 
 const lines = [{ jp: "朝", en: "Morning", start: 1.2, end: null }, { jp: "夜", en: "Night", start: 4, end: null }];
 test("loads as classic scripts without global declaration collisions", () => {
@@ -44,6 +53,101 @@ test("media picker defers format validation until after file selection", () => {
   assert.ok(mediaInput);
   assert.doesNotMatch(mediaInput, /\saccept=/);
   assert.match(app, /\$\("#media-file"\)\.addEventListener\("change", \(event\) => \{[\s\S]*?event\.target\.value = "";[\s\S]*?loadMedia\(file\);[\s\S]*?\}\);/);
+});
+test("bilingual lyric drafts preserve a blank line in one language", () => {
+  assert.deepEqual(parseLyricDrafts(
+    "一行目\n二行目\n三行目",
+    "First line\n\nThird line",
+  ), [
+    { jp: "一行目", en: "First line" },
+    { jp: "二行目", en: "" },
+    { jp: "三行目", en: "Third line" },
+  ]);
+});
+test("bilingual lyric drafts remove rows blank in both languages after alignment", () => {
+  assert.deepEqual(parseLyricDrafts(
+    "一行目\n\n二行目",
+    "First line\n\nSecond line",
+  ), [
+    { jp: "一行目", en: "First line" },
+    { jp: "二行目", en: "Second line" },
+  ]);
+});
+test("Japanese-only lyric drafts discard internal blank rows", () => {
+  assert.deepEqual(parseLyricDrafts("一行目\n\n二行目", ""), [
+    { jp: "一行目", en: "" },
+    { jp: "二行目", en: "" },
+  ]);
+});
+test("English-only lyric drafts discard internal blank rows", () => {
+  assert.deepEqual(parseLyricDrafts("", "First line\n\nSecond line"), [
+    { jp: "", en: "First line" },
+    { jp: "", en: "Second line" },
+  ]);
+});
+test("lyric drafts trim outer blank lines without shifting bilingual content", () => {
+  assert.deepEqual(parseLyricDrafts(
+    "\n\n 一行目 \n二行目\n\n",
+    "\n First line\nSecond line \n\n\n",
+  ), [
+    { jp: "一行目", en: "First line" },
+    { jp: "二行目", en: "Second line" },
+  ]);
+});
+test("shorter bilingual draft is padded and reported for review", () => {
+  const draft = lyricDraftInfo(
+    "一行目\n二行目\n三行目",
+    "First line\nSecond line",
+  );
+  assert.deepEqual(draft.rows, [
+    { jp: "一行目", en: "First line" },
+    { jp: "二行目", en: "Second line" },
+    { jp: "三行目", en: "" },
+  ]);
+  assert.equal(draft.lengthsDiffer, true);
+});
+test("aligned bilingual blanks remain visible to quality checks and SRT export", () => {
+  const timed = parseLyricDrafts(
+    "一行目\n二行目\n三行目",
+    "First line\n\nThird line",
+  ).map((line, index) => ({ ...line, start: index * 2 + 1 }));
+  const report = analyzeProject(timed, 8);
+  const english = makeSrt(timed, "en", 8);
+  const bilingual = makeSrt(timed, "bilingual", 8);
+  assert.ok(report.issues.some((issue) => issue.code === "language" && issue.index === 1));
+  assert.doesNotMatch(english, /00:00:03,000/);
+  assert.match(english, /00:00:05,000 --> 00:00:08,000\nThird line/);
+  assert.match(bilingual, /00:00:03,000 --> 00:00:04,980\n二行目/);
+  assert.match(bilingual, /三行目\nThird line/);
+});
+test("draft count and lyric import share the aligned parser result", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(app, /function updateDraftCount\(\) \{[\s\S]*?lyricDraftInfo\([\s\S]*?draft\.rows\.length/);
+  assert.match(app, /function applyLyrics\(\) \{[\s\S]*?lyricDraftInfo\([\s\S]*?state\.lines = draft\.rows\.map/);
+  assert.match(app, /draft\.lengthsDiffer[\s\S]*?日本語とEnglishの行数が異なります。空欄になった行を確認してください。/);
+});
+test("capture rejects every recording route until a media object URL is loaded", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const guardIndex = captureSource.indexOf("if (!hasLoadedMedia())");
+  const firstMutationIndex = captureSource.indexOf("pushChange(");
+  assert.ok(guardIndex >= 0 && firstMutationIndex > guardIndex);
+  assert.match(captureSource.slice(guardIndex, firstMutationIndex), /先に曲を選んでください。/);
+  assert.match(captureSource.slice(guardIndex, firstMutationIndex), /曲が選択されていません/);
+  assert.doesNotMatch(captureSource, /player\.paused/);
+  assert.match(app, /function hasLoadedMedia\(\) \{[\s\S]*?state\.mediaUrl[\s\S]*?player\.getAttribute\("src"\)/);
+  assert.match(app, /function loadMedia\(sourceFile\) \{[\s\S]*?state\.mediaUrl = URL\.createObjectURL\(file\);[\s\S]*?player\.src = state\.mediaUrl;/);
+  assert.match(app, /\$\("#capture-active"\)\.onclick = \(\) => capture\(\);/);
+  assert.match(app, /\$\("#capture-floating"\)\.onclick = \(\) => capture\(\);/);
+  assert.match(app, /data-action=capture-start[\s\S]*?capture\(index, "start"\)/);
+  assert.match(app, /data-action=capture-end[\s\S]*?capture\(index, "end"\)/);
+  assert.match(app, /event\.code === "Space"[\s\S]*?capture\(\)/);
+  assert.match(app, /event\.code === "KeyE"[\s\S]*?capture\(state\.activeIndex, "end"\)/);
+});
+test("opening a project unloads any previous media before capture can resume", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(app, /function applyProject\([\s\S]*?unloadMedia\(\);[\s\S]*?mediaUrl: null/);
+  assert.match(app, /function unloadMedia\(\) \{[\s\S]*?URL\.revokeObjectURL[\s\S]*?player\.removeAttribute\("src"\)/);
 });
 test("timeline creates blocks only for recorded lines", () => {
   const blocks = buildTimelineBlocks([{ start: null }, { start: 2 }, { start: "" }, { start: 5 }], 8);
@@ -104,7 +208,11 @@ test("timeline exposes full and edit modes plus beta candidate branding", () => 
   assert.match(html, /data-timeline-mode="full"/);
   assert.match(html, /data-timeline-mode="edit"/);
   assert.match(html, /音に、<br><em>言葉の居場所をつくる。<\/em>/);
-  assert.match(html, /Lyric SRT Studio v2\.3\.0 β候補版/);
+  assert.match(html, /BETA CANDIDATE \/ 2\.3\.1/);
+  assert.match(html, /Lyric SRT Studio v2\.3\.1 β候補版/);
+  assert.match(html, /styles\.css\?v=2\.3\.1/);
+  assert.match(html, /srt-core\.js\?v=2\.3\.1/);
+  assert.match(html, /app\.js\?v=2\.3\.1/);
   assert.match(css, /\.timeline-block\.just-recorded/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
