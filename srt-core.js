@@ -96,6 +96,39 @@ function parseLyricDrafts(jpRaw, enRaw) {
   return lyricDraftInfo(jpRaw, enRaw).rows;
 }
 
+function nextTimelineFollowState(currentEnabled, currentMode) {
+  const enabled = !currentEnabled;
+  return {
+    enabled,
+    mode: enabled ? "edit" : (currentMode === "edit" ? "edit" : "full"),
+  };
+}
+
+function timelineFollowScrollTarget({
+  enabled,
+  mode,
+  currentTime,
+  duration,
+  contentWidth,
+  viewportWidth,
+  scrollLeft,
+  force = false,
+}) {
+  if (!enabled || mode !== "edit") return null;
+  const timelineDuration = Number(duration);
+  const timelineWidth = Number(contentWidth);
+  const visibleWidth = Number(viewportWidth);
+  if (!(timelineDuration > 0) || !(timelineWidth > 0) || !(visibleWidth > 0)) return null;
+  const current = Math.max(0, Math.min(timelineDuration, Number(currentTime) || 0));
+  const left = Math.max(0, Number(scrollLeft) || 0);
+  const playheadX = current / timelineDuration * timelineWidth;
+  const leadingEdge = left + visibleWidth * .22;
+  const trailingEdge = left + visibleWidth * .78;
+  if (!force && playheadX >= leadingEdge && playheadX <= trailingEdge) return null;
+  const maximumLeft = Math.max(0, timelineWidth - visibleWidth);
+  return Math.max(0, Math.min(maximumLeft, playheadX - visibleWidth * .38));
+}
+
 function lineText(line, language) {
   if (language === "bilingual") return [line.jp, line.en].map((text) => String(text || "").trim()).filter(Boolean).join("\n");
   return String(line[language] || "").trim();
@@ -163,9 +196,11 @@ globalThis.LyricSrtCore = {
   lineText,
   lyricDraftInfo,
   makeSrt,
+  nextTimelineFollowState,
   parseLyricDrafts,
   resolveEnd,
   resolveEndDetails,
+  timelineFollowScrollTarget,
   validateLines,
 };
 })();
