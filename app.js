@@ -4,7 +4,9 @@ const {
   isTime,
   lyricDraftInfo,
   makeSrt,
+  nextTimelineFollowState,
   resolveEnd,
+  timelineFollowScrollTarget,
   validateLines,
 } = globalThis.LyricSrtCore;
 
@@ -45,9 +47,10 @@ const state = {
   waveform: null,
   history: [],
   future: [],
-  followCapture: preferences.followCapture !== false,
+  followTimeline: preferences.followTimeline ?? (preferences.followCapture !== false),
   timelineMode: preferences.timelineMode === "edit" ? "edit" : "full",
 };
+if (state.followTimeline) state.timelineMode = "edit";
 
 let waveformFrame = null;
 let toastTimer = null;
@@ -215,29 +218,41 @@ function setStatus(message) {
 function savePreferences() {
   try {
     localStorage.setItem(PREFERENCES_KEY, JSON.stringify({
-      followCapture: state.followCapture,
+      followTimeline: state.followTimeline,
       timelineMode: state.timelineMode,
     }));
   } catch { /* Preferences remain available for this session. */ }
 }
 
-function updateCaptureFollowControls() {
+function updateTimelineFollowControls() {
   [$("#capture-follow"), $("#floating-follow")].forEach((button) => {
-    button.classList.toggle("enabled", state.followCapture);
-    button.ariaPressed = String(state.followCapture);
+    button.classList.toggle("enabled", state.followTimeline);
+    button.ariaPressed = String(state.followTimeline);
   });
-  $("#capture-follow-state").textContent = state.followCapture ? "ON" : "OFF";
-  $("#floating-follow-state").textContent = state.followCapture ? "ON" : "OFF";
+  $("#capture-follow-state").textContent = state.followTimeline ? "ON" : "OFF";
+  $("#floating-follow-state").textContent = state.followTimeline ? "ON" : "OFF";
 }
 
-function toggleCaptureFollow() {
-  state.followCapture = !state.followCapture;
+function toggleTimelineFollow() {
+  const next = nextTimelineFollowState(state.followTimeline, state.timelineMode);
+  const modeChanged = next.mode !== state.timelineMode;
+  state.followTimeline = next.enabled;
+  state.timelineMode = next.mode;
   savePreferences();
-  updateCaptureFollowControls();
-  const label = state.followCapture ? "ON" : "OFF";
-  if (state.followCapture) followTimelineToPlayhead(true);
-  setStatus(`タイムラインの画面追従を${label}にしました。`);
-  showToast(`画面追従：${label}`);
+  updateTimelineFollowControls();
+  updateTimelineModeControls();
+  if (modeChanged) {
+    renderTimeline();
+    drawWaveform();
+  }
+  if (state.followTimeline) {
+    followTimelineToPlayhead({ force: true, behavior: "smooth" });
+    setStatus("タイムライン追従をONにしました。編集表示で再生位置を追いかけます。");
+    showToast("タイムライン追従：ON");
+  } else {
+    setStatus("タイムライン追従をOFFにしました。表示位置を固定します。");
+    showToast("タイムライン追従：OFF");
+  }
 }
 
 function updateTimelineModeControls() {
@@ -252,13 +267,21 @@ function updateTimelineModeControls() {
 function setTimelineMode(mode) {
   if (!["full", "edit"].includes(mode) || state.timelineMode === mode) return;
   state.timelineMode = mode;
+  const disabledFollow = mode === "full" && state.followTimeline;
+  if (disabledFollow) state.followTimeline = false;
   savePreferences();
   updateTimelineModeControls();
+  updateTimelineFollowControls();
   renderTimeline();
   drawWaveform();
-  if (mode === "edit") followTimelineToPlayhead(true);
+  if (mode === "edit" && state.followTimeline) followTimelineToPlayhead({ force: true, behavior: "smooth" });
   else timelineViewport.scrollLeft = 0;
-  setStatus(mode === "edit" ? "編集表示に切り替えました。横へ動かして細部を確認できます。" : "曲全体を表示しました。");
+  if (disabledFollow) {
+    setStatus("全体表示に切り替え、タイムライン追従をOFFにしました。");
+    showToast("タイムライン追従：OFF");
+  } else {
+    setStatus(mode === "edit" ? "編集表示に切り替えました。横へ動かして細部を確認できます。" : "曲全体を表示しました。");
+  }
 }
 
 function showToast(message, action = null) {
@@ -316,7 +339,7 @@ function capture(index = state.activeIndex, field = "start") {
   if (field === "start") state.activeIndex = Math.min(index + 1, state.lines.length - 1);
   else state.activeIndex = index;
   render(false);
-  if (field === "start" && state.followCapture) followTimelineToPlayhead(true);
+  if (field === "start" && state.followTimeline) followTimelineToPlayhead({ force: true, behavior: "auto" });
   saveLocal();
   const kind = field === "start" ? "開始" : "終了";
   setStatus(`${index + 1}行目の${kind}を${timeLabel(time)}に記録しました。`);
@@ -544,28 +567,29 @@ function selectTimelineBlock(index, start) {
   state.activeIndex = Math.max(0, Math.min(index, state.lines.length - 1));
   if (hasLoadedMedia()) player.currentTime = Math.max(0, Math.min(state.duration || Infinity, Number(start)));
   render(false);
-  updatePlayhead();
-  if (state.followCapture) followTimelineToPlayhead(true);
+  updatePlayhead({ follow: false });
+  if (state.followTimeline) followTimelineToPlayhead({ force: true, behavior: "smooth" });
   setStatus(hasLoadedMedia()
     ? `${index + 1}行目を選択し、${timeLabel(start)}へ移動しました。`
     : `${index + 1}行目を選択しました。再生位置を確認するには曲を選び直してください。`);
 }
 
-function followTimelineToPlayhead(force = false) {
-  if (!state.followCapture || state.timelineMode !== "edit") return;
+function followTimelineToPlayhead({ force = false, behavior = "auto" } = {}) {
   const duration = timelineDuration();
-  if (!duration) return;
   const contentWidth = timelineContent.getBoundingClientRect().width;
-  const playheadX = Math.max(0, Math.min(contentWidth, player.currentTime / duration * contentWidth));
   const viewportWidth = timelineViewport.clientWidth;
-  const left = timelineViewport.scrollLeft;
-  const leadingEdge = left + viewportWidth * .22;
-  const trailingEdge = left + viewportWidth * .78;
-  if (!force && playheadX >= leadingEdge && playheadX <= trailingEdge) return;
-  timelineViewport.scrollTo({
-    left: Math.max(0, playheadX - viewportWidth * .38),
-    behavior: force ? "smooth" : "auto",
+  const target = timelineFollowScrollTarget({
+    enabled: state.followTimeline,
+    mode: state.timelineMode,
+    currentTime: player.currentTime,
+    duration,
+    contentWidth,
+    viewportWidth,
+    scrollLeft: timelineViewport.scrollLeft,
+    force,
   });
+  if (target === null) return;
+  timelineViewport.scrollTo({ left: target, behavior });
 }
 
 function renderRows(scroll = false) {
@@ -630,18 +654,26 @@ function updateFocus() {
   $("#session-lines").textContent = `${state.lines.length} LINES`;
   $("#session-duration").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
   $("#duration-time").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
-  const undoButton = $("#undo-capture");
-  const redoButton = $("#redo-capture");
+  updateHistoryControls();
+  updateDockPlayback();
+  updateTimelineFollowControls();
+}
+
+function updateHistoryControls() {
   const undoChange = state.history[state.history.length - 1];
   const redoChange = state.future[state.future.length - 1];
-  undoButton.disabled = !undoChange;
-  redoButton.disabled = !redoChange;
-  undoButton.textContent = undoChange ? `↶ 戻す ${state.history.length}` : "↶ 戻す";
-  redoButton.textContent = redoChange ? `↷ やり直す ${state.future.length}` : "↷ やり直す";
-  undoButton.title = undoChange ? `${undoChange.label}を元に戻す（残り${state.history.length}件）` : "元に戻せる操作はありません";
-  redoButton.title = redoChange ? `${redoChange.label}をやり直す（残り${state.future.length}件）` : "やり直せる操作はありません";
-  updateDockPlayback();
-  updateCaptureFollowControls();
+  [$("#undo-capture"), $("#floating-undo")].forEach((button) => {
+    button.disabled = !undoChange;
+    button.textContent = undoChange ? `↶ 戻る ${state.history.length}` : "↶ 戻る";
+    button.title = undoChange ? `${undoChange.label}を元に戻す（残り${state.history.length}件）` : "元に戻せる操作はありません";
+    button.ariaLabel = button.title;
+  });
+  [$("#redo-capture"), $("#floating-redo")].forEach((button) => {
+    button.disabled = !redoChange;
+    button.textContent = redoChange ? `↷ やり直す ${state.future.length}` : "↷ やり直す";
+    button.title = redoChange ? `${redoChange.label}をやり直す（残り${state.future.length}件）` : "やり直せる操作はありません";
+    button.ariaLabel = button.title;
+  });
 }
 
 function renderQuality(report = analyzeProject(state.lines, state.duration)) {
@@ -701,7 +733,7 @@ function updatePreview() {
   $("#preview-en").hidden = !en;
 }
 
-function updatePlayhead() {
+function updatePlayhead({ follow = true } = {}) {
   const duration = timelineDuration();
   const ratio = duration ? Math.min(1, player.currentTime / duration) : 0;
   $("#waveform-playhead").style.left = `${ratio * 100}%`;
@@ -709,7 +741,7 @@ function updatePlayhead() {
   $("#current-time").textContent = timeLabel(player.currentTime);
   updateDockPlayback();
   updatePreview();
-  followTimelineToPlayhead();
+  if (follow) followTimelineToPlayhead();
 }
 
 function updateDockPlayback() {
@@ -903,10 +935,12 @@ $("#go-next-unrecorded").onclick = goToNextUnrecorded;
 $("#clear-all-times").onclick = clearAllTimes;
 $("#capture-active").onclick = () => capture();
 $("#capture-floating").onclick = () => capture();
-$("#capture-follow").onclick = toggleCaptureFollow;
-$("#floating-follow").onclick = toggleCaptureFollow;
+$("#capture-follow").onclick = toggleTimelineFollow;
+$("#floating-follow").onclick = toggleTimelineFollow;
 $("#undo-capture").onclick = undo;
 $("#redo-capture").onclick = redo;
+$("#floating-undo").onclick = undo;
+$("#floating-redo").onclick = redo;
 $("#rewind-3").onclick = () => seek(-3);
 $("#forward-3").onclick = () => seek(3);
 $("#play-toggle").onclick = togglePlayback;

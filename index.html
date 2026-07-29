@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="波形と字幕タイムラインを見ながら、日本語・English・日英併記のSRTを端末内だけで仕上げます。">
   <title>Lyric SRT Studio — 音に、言葉の居場所をつくる。</title>
-  <link rel="stylesheet" href="styles.css?v=2.3.1">
+  <link rel="stylesheet" href="styles.css?v=2.3.2">
 </head>
 <body>
   <header class="app-header">
@@ -27,7 +27,7 @@
   <main id="top" class="app-shell">
     <section class="intro-card">
       <div>
-        <div class="intro-eyebrow"><p class="kicker">LYRIC SUBTITLE WORKSPACE</p><span class="version-tag">BETA CANDIDATE / 2.3.1</span></div>
+        <div class="intro-eyebrow"><p class="kicker">LYRIC SUBTITLE WORKSPACE</p><span class="version-tag">BETA CANDIDATE / 2.3.2</span></div>
         <h1>音に、<br><em>言葉の居場所をつくる。</em></h1>
         <p>曲を再生し、歌い始めに合わせて記録。<br>波形と字幕タイムラインを見ながら、日本語・English・日英併記のSRTを端末内だけで仕上げます。</p>
         <div class="session-chips" aria-label="セッション情報">
@@ -128,13 +128,13 @@
         <div class="dock-mini-player" aria-label="固定再生操作">
           <button id="dock-play-toggle" class="dock-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="dock-play-icon">▶</span><small id="dock-play-label">再生</small></button>
           <div class="dock-media"><strong id="dock-media-name">曲が未選択です</strong><span><output id="dock-current-time">00:00.000</output><i>/</i><output id="dock-duration">--:--.---</output></span></div>
-          <button id="capture-follow" class="capture-follow enabled" type="button" aria-label="タイムラインの画面追従を切り替える" aria-pressed="true"><span aria-hidden="true"></span><strong>画面追従</strong><small id="capture-follow-state">ON</small></button>
+          <button id="capture-follow" class="capture-follow enabled" type="button" aria-label="タイムラインの再生位置追従を切り替える" title="タイムラインの再生位置追従を切り替える" aria-pressed="true"><span aria-hidden="true"></span><strong><span class="follow-label-full">タイムライン追従</span><span class="follow-label-short">追従</span></strong><small id="capture-follow-state">ON</small></button>
         </div>
         <button id="capture-active" class="capture-button" type="button"><span id="capture-active-context">この位置で</span><strong>開始を記録</strong><kbd>Space</kbd></button>
         <div class="shortcut-strip" aria-label="キーボードショートカット"><span><kbd>J</kbd>戻る</span><span><kbd>K</kbd>再生</span><span><kbd>L</kbd>進む</span><span><kbd>E</kbd>終了</span></div>
         <div class="dock-actions">
-          <button id="undo-capture" type="button" disabled>↶ 元に戻す</button>
-          <button id="redo-capture" type="button" disabled>↷ やり直す</button>
+          <button id="undo-capture" type="button" aria-label="元に戻せる操作はありません" title="元に戻せる操作はありません" disabled>↶ 戻る</button>
+          <button id="redo-capture" type="button" aria-label="やり直せる操作はありません" title="やり直せる操作はありません" disabled>↷ やり直す</button>
         </div>
         <p id="status" class="status" role="status">曲と歌詞を準備してください。</p>
       </aside>
@@ -166,7 +166,7 @@
       </div>
     </section>
 
-    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.3.1 β候補版</small></footer>
+    <footer><strong>LOCAL-FIRST</strong><span>音源・歌詞・プロジェクトはこの端末内だけで処理されます。</span><small>Lyric SRT Studio v2.3.2 β候補版</small></footer>
   </main>
 
   <nav id="quick-nav" class="quick-nav" aria-label="ページ内の移動" hidden>
@@ -178,13 +178,17 @@
   <div id="floating-console" class="floating-console" aria-label="固定編集コンソール" hidden>
     <button id="floating-play-toggle" class="floating-play-toggle" type="button" aria-label="再生" aria-pressed="false"><span id="floating-play-icon">▶</span></button>
     <div class="floating-media"><strong id="floating-media-name">曲が未選択です</strong><output id="floating-current-time">00:00.000</output></div>
-    <button id="floating-follow" class="floating-follow enabled" type="button" aria-label="タイムラインの画面追従を切り替える" aria-pressed="true"><span>追従</span><strong id="floating-follow-state">ON</strong></button>
+    <button id="floating-follow" class="floating-follow enabled" type="button" aria-label="タイムラインの再生位置追従を切り替える" title="タイムラインの再生位置追従を切り替える" aria-pressed="true"><span>追従</span><strong id="floating-follow-state">ON</strong></button>
+    <div class="floating-history" role="group" aria-label="取り消しとやり直し">
+      <button id="floating-undo" type="button" aria-label="元に戻せる操作はありません" title="元に戻せる操作はありません" disabled>↶ 戻る</button>
+      <button id="floating-redo" type="button" aria-label="やり直せる操作はありません" title="やり直せる操作はありません" disabled>↷ やり直す</button>
+    </div>
     <button id="capture-floating" class="capture-floating" type="button">
       <span id="capture-floating-number">—</span><strong>開始を記録</strong><kbd>Space</kbd>
     </button>
   </div>
   <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button id="toast-action" type="button" hidden>元に戻す</button></div>
-  <script defer src="srt-core.js?v=2.3.1"></script>
-  <script defer src="app.js?v=2.3.1"></script>
+  <script defer src="srt-core.js?v=2.3.2"></script>
+  <script defer src="app.js?v=2.3.2"></script>
 </body>
 </html>

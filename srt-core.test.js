@@ -10,8 +10,10 @@ const {
   formatSrtTime,
   lyricDraftInfo,
   makeSrt,
+  nextTimelineFollowState,
   parseLyricDrafts,
   resolveEnd,
+  timelineFollowScrollTarget,
   validateLines,
 } = globalThis.LyricSrtCore;
 
@@ -28,23 +30,106 @@ test("mobile editing controls expose labeled navigation and multi-step history",
   ["上へ", "選択行", "未記録", "下へ"].forEach((label) => assert.match(html, new RegExp(`<span>${label}</span>`)));
   assert.match(app, /state\.history\[state\.history\.length - 1\]/);
   assert.match(app, /state\.future\[state\.future\.length - 1\]/);
-  assert.match(app, /戻す \$\{state\.history\.length\}/);
+  assert.match(app, /戻る \$\{state\.history\.length\}/);
   assert.match(app, /やり直す \$\{state\.future\.length\}/);
   assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 2;/);
 });
-test("fixed editing consoles expose playback and optional capture following", () => {
+test("fixed editing consoles expose playback and timeline following", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   ["dock-play-toggle", "capture-follow", "floating-console", "floating-play-toggle", "floating-follow"].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
-  assert.match(app, /render\(false\);\s+if \(field === "start" && state\.followCapture\) followTimelineToPlayhead\(true\);/);
-  assert.match(app, /followCapture: state\.followCapture,\s+timelineMode: state\.timelineMode,/);
+  assert.match(app, /render\(false\);\s+if \(field === "start" && state\.followTimeline\) followTimelineToPlayhead\(\{ force: true, behavior: "auto" \}\);/);
+  assert.match(app, /followTimeline: state\.followTimeline,\s+timelineMode: state\.timelineMode,/);
   assert.match(app, /\$\("#dock-play-toggle"\)\.onclick = togglePlayback;/);
   assert.match(app, /\$\("#floating-play-toggle"\)\.onclick = togglePlayback;/);
   assert.match(css, /\.dock-mini-player \{/);
   assert.match(css, /\.floating-console \{/);
+});
+test("touch controls suppress double-tap zoom without disabling accessible page zoom", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const viewport = html.match(/<meta name="viewport"[^>]*>/)?.[0] || "";
+  assert.doesNotMatch(viewport, /user-scalable\s*=\s*no/i);
+  assert.doesNotMatch(viewport, /maximum-scale\s*=\s*1/i);
+  assert.match(css, /button, label\[for\], summary, a\[href\] \{[\s\S]*?touch-action: manipulation;/);
+  assert.match(css, /-webkit-user-select: none;[\s\S]*?user-select: none;/);
+  assert.match(css, /-webkit-tap-highlight-color:/);
+  assert.match(css, /\.timeline-viewport \{[^}]*touch-action: pan-x pan-y pinch-zoom;/);
+  assert.match(css, /@media \(pointer: coarse\) \{[\s\S]*?min-height: 44px;/);
+  assert.doesNotMatch(app, /addEventListener\(["']touch(?:start|move|end|cancel)["']/);
+});
+test("timeline follow toggle turns ON in edit mode and keeps edit mode when turned OFF", () => {
+  assert.deepEqual(nextTimelineFollowState(false, "full"), { enabled: true, mode: "edit" });
+  assert.deepEqual(nextTimelineFollowState(true, "edit"), { enabled: false, mode: "edit" });
+  assert.deepEqual(nextTimelineFollowState(false, "edit"), { enabled: true, mode: "edit" });
+});
+test("timeline follow computes an internal scroll target only while enabled in edit mode", () => {
+  const options = {
+    enabled: true,
+    mode: "edit",
+    currentTime: 50,
+    duration: 100,
+    contentWidth: 3200,
+    viewportWidth: 400,
+    scrollLeft: 0,
+    force: true,
+  };
+  assert.equal(timelineFollowScrollTarget(options), 1448);
+  assert.equal(timelineFollowScrollTarget({ ...options, enabled: false }), null);
+  assert.equal(timelineFollowScrollTarget({ ...options, mode: "full" }), null);
+  assert.equal(timelineFollowScrollTarget({ ...options, force: false, scrollLeft: 1400 }), null);
+});
+test("timeline follow UI switches modes, syncs controls, and never scrolls the page", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(html, /タイムライン追従/);
+  assert.match(html, /aria-label="タイムラインの再生位置追従を切り替える"/);
+  assert.match(html, /title="タイムラインの再生位置追従を切り替える"/);
+  const toggleSource = app.match(/function toggleTimelineFollow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(toggleSource, /nextTimelineFollowState\(state\.followTimeline, state\.timelineMode\)/);
+  assert.match(toggleSource, /renderTimeline\(\);[\s\S]*?followTimelineToPlayhead\(\{ force: true, behavior: "smooth" \}\)/);
+  assert.match(toggleSource, /タイムライン追従をONにしました。編集表示で再生位置を追いかけます。/);
+  assert.match(toggleSource, /タイムライン追従をOFFにしました。表示位置を固定します。/);
+  assert.match(app, /if \(state\.followTimeline\) state\.timelineMode = "edit";/);
+  const modeSource = app.match(/function setTimelineMode\(mode\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(modeSource, /mode === "full" && state\.followTimeline/);
+  assert.match(modeSource, /if \(disabledFollow\) state\.followTimeline = false;/);
+  assert.match(modeSource, /updateTimelineFollowControls\(\);/);
+  const controlsSource = app.match(/function updateTimelineFollowControls\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(controlsSource, /\[\$\("#capture-follow"\), \$\("#floating-follow"\)\]/);
+  assert.match(controlsSource, /ariaPressed = String\(state\.followTimeline\)/);
+  const followSource = app.match(/function followTimelineToPlayhead\([\s\S]*?\n\}/)?.[0] || "";
+  assert.match(followSource, /timelineFollowScrollTarget\(/);
+  assert.match(followSource, /timelineViewport\.scrollTo\(\{ left: target, behavior \}\)/);
+  assert.doesNotMatch(followSource, /scrollIntoView/);
+  assert.match(app, /function updatePlayhead\(\{ follow = true \} = \{\}\) \{[\s\S]*?if \(follow\) followTimelineToPlayhead\(\);/);
+  assert.match(app, /function selectTimelineBlock\([\s\S]*?updatePlayhead\(\{ follow: false \}\);[\s\S]*?followTimelineToPlayhead\(\{ force: true, behavior: "smooth" \}\)/);
+});
+test("fixed consoles expose unique synchronized Undo and Redo controls", () => {
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  ["undo-capture", "redo-capture", "floating-undo", "floating-redo"].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`));
+  });
+  assert.match(app, /\$\("#undo-capture"\)\.onclick = undo;/);
+  assert.match(app, /\$\("#floating-undo"\)\.onclick = undo;/);
+  assert.match(app, /\$\("#redo-capture"\)\.onclick = redo;/);
+  assert.match(app, /\$\("#floating-redo"\)\.onclick = redo;/);
+  const controlsSource = app.match(/function updateHistoryControls\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(controlsSource, /\[\$\("#undo-capture"\), \$\("#floating-undo"\)\]/);
+  assert.match(controlsSource, /\[\$\("#redo-capture"\), \$\("#floating-redo"\)\]/);
+  assert.match(controlsSource, /button\.disabled = !undoChange/);
+  assert.match(controlsSource, /button\.disabled = !redoChange/);
+  assert.match(controlsSource, /state\.history\.length/);
+  assert.match(controlsSource, /state\.future\.length/);
+  assert.match(app, /function undo\(\) \{[\s\S]*?state\.history\.pop\(\)[\s\S]*?state\.future\.push\(change\)/);
+  assert.match(app, /function redo\(\) \{[\s\S]*?state\.future\.pop\(\)[\s\S]*?state\.history\.push\(change\)/);
 });
 test("media picker defers format validation until after file selection", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
@@ -198,9 +283,9 @@ test("capture follow stays inside the timeline instead of scrolling the page", (
   const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(captureSource, /render\(false\);/);
-  assert.match(captureSource, /followTimelineToPlayhead\(true\)/);
+  assert.match(captureSource, /followTimelineToPlayhead\(\{ force: true, behavior: "auto" \}\)/);
   assert.doesNotMatch(captureSource, /scrollIntoView/);
-  assert.match(app, /if \(!state\.followCapture \|\| state\.timelineMode !== "edit"\) return;/);
+  assert.match(app, /timelineFollowScrollTarget\(\{[\s\S]*?enabled: state\.followTimeline,[\s\S]*?mode: state\.timelineMode,/);
 });
 test("timeline exposes full and edit modes plus beta candidate branding", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
@@ -208,11 +293,11 @@ test("timeline exposes full and edit modes plus beta candidate branding", () => 
   assert.match(html, /data-timeline-mode="full"/);
   assert.match(html, /data-timeline-mode="edit"/);
   assert.match(html, /音に、<br><em>言葉の居場所をつくる。<\/em>/);
-  assert.match(html, /BETA CANDIDATE \/ 2\.3\.1/);
-  assert.match(html, /Lyric SRT Studio v2\.3\.1 β候補版/);
-  assert.match(html, /styles\.css\?v=2\.3\.1/);
-  assert.match(html, /srt-core\.js\?v=2\.3\.1/);
-  assert.match(html, /app\.js\?v=2\.3\.1/);
+  assert.match(html, /BETA CANDIDATE \/ 2\.3\.2/);
+  assert.match(html, /Lyric SRT Studio v2\.3\.2 β候補版/);
+  assert.match(html, /styles\.css\?v=2\.3\.2/);
+  assert.match(html, /srt-core\.js\?v=2\.3\.2/);
+  assert.match(html, /app\.js\?v=2\.3\.2/);
   assert.match(css, /\.timeline-block\.just-recorded/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
