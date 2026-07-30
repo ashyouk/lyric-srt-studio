@@ -7,10 +7,10 @@ import "./srt-core.js";
 const {
   analyzeProject,
   buildTimelineBlocks,
+  findNextUnrecordedIndex,
   formatSrtTime,
   lyricDraftInfo,
   makeSrt,
-  nextTimelineFollowState,
   parseLyricDrafts,
   resolveEnd,
   timelineFollowScrollTarget,
@@ -34,14 +34,14 @@ test("mobile editing controls expose labeled navigation and multi-step history",
   assert.match(app, /やり直す \$\{state\.future\.length\}/);
   assert.match(css, /\.dock-actions \{ display: grid; grid-column: 1; grid-row: 2;/);
 });
-test("fixed editing consoles expose playback and timeline following", () => {
+test("fixed editing consoles expose playback and lyric-line following", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   ["dock-play-toggle", "capture-follow", "floating-console", "floating-play-toggle", "floating-follow"].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
-  assert.match(app, /render\(false\);\s+if \(field === "start" && state\.followTimeline\) followTimelineToPlayhead\(\{ force: true, behavior: "auto" \}\);/);
+  assert.match(app, /render\(false\);\s+if \(field === "start" && state\.followTimeline\) \{[\s\S]*?followActiveLyricLine\(\{ behavior: "auto" \}\);[\s\S]*?followTimelineToPlayhead\(\{ force: true, behavior: "auto" \}\);/);
   assert.match(app, /followTimeline: state\.followTimeline,\s+timelineMode: state\.timelineMode,/);
   assert.match(app, /\$\("#dock-play-toggle"\)\.onclick = togglePlayback;/);
   assert.match(app, /\$\("#floating-play-toggle"\)\.onclick = togglePlayback;/);
@@ -62,10 +62,13 @@ test("touch controls suppress double-tap zoom without disabling accessible page 
   assert.match(css, /@media \(pointer: coarse\) \{[\s\S]*?min-height: 44px;/);
   assert.doesNotMatch(app, /addEventListener\(["']touch(?:start|move|end|cancel)["']/);
 });
-test("timeline follow toggle turns ON in edit mode and keeps edit mode when turned OFF", () => {
-  assert.deepEqual(nextTimelineFollowState(false, "full"), { enabled: true, mode: "edit" });
-  assert.deepEqual(nextTimelineFollowState(true, "edit"), { enabled: false, mode: "edit" });
-  assert.deepEqual(nextTimelineFollowState(false, "edit"), { enabled: true, mode: "edit" });
+test("lyric-line progression finds the next unrecorded row in sequence", () => {
+  const draft = [{ start: 1 }, { start: null }, { start: 3 }, { start: null }];
+  assert.equal(findNextUnrecordedIndex(draft, 2), 3);
+  assert.equal(findNextUnrecordedIndex(draft, 4), 1);
+  assert.equal(findNextUnrecordedIndex(draft, -1), 3);
+  assert.equal(findNextUnrecordedIndex([{ start: 1 }, { start: 2 }], 1), -1);
+  assert.equal(findNextUnrecordedIndex([], 0), -1);
 });
 test("timeline follow computes an internal scroll target only while enabled in edit mode", () => {
   const options = {
@@ -83,31 +86,63 @@ test("timeline follow computes an internal scroll target only while enabled in e
   assert.equal(timelineFollowScrollTarget({ ...options, mode: "full" }), null);
   assert.equal(timelineFollowScrollTarget({ ...options, force: false, scrollLeft: 1400 }), null);
 });
-test("timeline follow UI switches modes, syncs controls, and never scrolls the page", () => {
+test("lyric-line follow UI syncs controls without forcing a timeline mode", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
-  assert.match(html, /タイムライン追従/);
-  assert.match(html, /aria-label="タイムラインの再生位置追従を切り替える"/);
-  assert.match(html, /title="タイムラインの再生位置追従を切り替える"/);
-  const toggleSource = app.match(/function toggleTimelineFollow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(toggleSource, /nextTimelineFollowState\(state\.followTimeline, state\.timelineMode\)/);
-  assert.match(toggleSource, /renderTimeline\(\);[\s\S]*?followTimelineToPlayhead\(\{ force: true, behavior: "smooth" \}\)/);
-  assert.match(toggleSource, /タイムライン追従をONにしました。編集表示で再生位置を追いかけます。/);
-  assert.match(toggleSource, /タイムライン追従をOFFにしました。表示位置を固定します。/);
-  assert.match(app, /if \(state\.followTimeline\) state\.timelineMode = "edit";/);
+  assert.match(html, /歌詞行追従/);
+  assert.match(html, /aria-label="歌詞行追従：ON。記録後に次の歌詞行を画面へ表示する"/);
+  assert.match(html, /title="歌詞行追従：ON。記録後に次の歌詞行を画面へ表示する"/);
+  const toggleSource = app.match(/function toggleLyricFollow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(toggleSource, /state\.followTimeline = !state\.followTimeline/);
+  assert.match(toggleSource, /followActiveLyricLine\(\{ behavior: "smooth" \}\)/);
+  assert.match(toggleSource, /followTimelineToPlayhead\(\{ force: true, behavior: "smooth" \}\)/);
+  assert.match(toggleSource, /歌詞行追従をONにしました。記録後に次の歌詞行を表示します。/);
+  assert.match(toggleSource, /歌詞行追従をOFFにしました。画面位置を固定します。/);
+  assert.doesNotMatch(toggleSource, /timelineMode|setTimelineMode|renderTimeline/);
   const modeSource = app.match(/function setTimelineMode\(mode\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(modeSource, /mode === "full" && state\.followTimeline/);
-  assert.match(modeSource, /if \(disabledFollow\) state\.followTimeline = false;/);
-  assert.match(modeSource, /updateTimelineFollowControls\(\);/);
-  const controlsSource = app.match(/function updateTimelineFollowControls\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.doesNotMatch(modeSource, /state\.followTimeline\s*=/);
+  const controlsSource = app.match(/function updateLyricFollowControls\(\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(controlsSource, /\[\$\("#capture-follow"\), \$\("#floating-follow"\)\]/);
   assert.match(controlsSource, /ariaPressed = String\(state\.followTimeline\)/);
+  assert.match(controlsSource, /button\.ariaLabel = description/);
+  assert.match(controlsSource, /button\.title = description/);
+  assert.match(controlsSource, /記録後に次の歌詞行を画面へ表示する/);
+  assert.match(app, /followTimeline: preferences\.followTimeline \?\? \(preferences\.followCapture !== false\)/);
+  assert.match(app, /followTimeline: state\.followTimeline,\s+timelineMode: state\.timelineMode,/);
   const followSource = app.match(/function followTimelineToPlayhead\([\s\S]*?\n\}/)?.[0] || "";
   assert.match(followSource, /timelineFollowScrollTarget\(/);
   assert.match(followSource, /timelineViewport\.scrollTo\(\{ left: target, behavior \}\)/);
   assert.doesNotMatch(followSource, /scrollIntoView/);
   assert.match(app, /function updatePlayhead\(\{ follow = true \} = \{\}\) \{[\s\S]*?if \(follow\) followTimelineToPlayhead\(\);/);
   assert.match(app, /function selectTimelineBlock\([\s\S]*?updatePlayhead\(\{ follow: false \}\);[\s\S]*?followTimelineToPlayhead\(\{ force: true, behavior: "smooth" \}\)/);
+});
+test("lyric-line follow scrolls only after a followed start capture", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const nextIndexPosition = captureSource.indexOf("findNextUnrecordedIndex(state.lines, index + 1)");
+  const renderPosition = captureSource.indexOf("render(false)");
+  const followPosition = captureSource.indexOf('followActiveLyricLine({ behavior: "auto" })');
+  assert.ok(nextIndexPosition >= 0 && renderPosition > nextIndexPosition && followPosition > renderPosition);
+  assert.match(captureSource, /if \(field === "start"\) \{[\s\S]*?state\.activeIndex = nextIndex >= 0 \? nextIndex : index;[\s\S]*?\} else \{\s+state\.activeIndex = index;/);
+  assert.match(captureSource, /if \(field === "start" && state\.followTimeline\) \{[\s\S]*?followActiveLyricLine/);
+  assert.equal((captureSource.match(/followActiveLyricLine/g) || []).length, 1);
+  const scrollSource = app.match(/function followActiveLyricLine\([\s\S]*?\n\}/)?.[0] || "";
+  assert.match(scrollSource, /cancelAnimationFrame\(lyricFollowFrame\)/);
+  assert.match(scrollSource, /requestAnimationFrame/);
+  assert.match(scrollSource, /prefers-reduced-motion: reduce/);
+  assert.match(scrollSource, /scrollIntoView\(\{[\s\S]*?block: "center"/);
+});
+test("Undo, Redo, end capture, and fine adjustment never trigger lyric-line follow", () => {
+  const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const undoSource = app.match(/function undo\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const redoSource = app.match(/function redo\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const adjustSource = app.match(/function adjustTime\([\s\S]*?\n\}/)?.[0] || "";
+  [undoSource, redoSource, adjustSource].forEach((source) => {
+    assert.doesNotMatch(source, /followActiveLyricLine|scrollIntoView/);
+  });
+  const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(captureSource, /\} else \{\s+state\.activeIndex = index;\s+\}\s+render\(false\);/);
+  assert.match(captureSource, /if \(field === "start" && state\.followTimeline\)/);
 });
 test("fixed consoles expose unique synchronized Undo and Redo controls", () => {
   const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
@@ -274,17 +309,16 @@ test("timeline UI restores, rerenders, seeks, and never captures from an empty t
   assert.match(app, /function applyProject\([\s\S]*?render\(\);/);
   assert.match(app, /function undo\(\) \{[\s\S]*?render\(\);/);
   assert.match(app, /function redo\(\) \{[\s\S]*?render\(\);/);
-  assert.match(app, /function selectTimelineBlock\(index, start\) \{[\s\S]*?state\.activeIndex[\s\S]*?player\.currentTime[\s\S]*?updatePlayhead\(\);/);
+  assert.match(app, /function selectTimelineBlock\(index, start\) \{[\s\S]*?state\.activeIndex[\s\S]*?player\.currentTime[\s\S]*?updatePlayhead\(\{ follow: false \}\);/);
   const emptyTap = app.match(/timelineContent\.addEventListener\("click", \(event\) => \{[\s\S]*?\n\}\);/)?.[0] || "";
   assert.match(emptyTap, /player\.currentTime =/);
   assert.doesNotMatch(emptyTap, /\bcapture\(/);
 });
-test("capture follow stays inside the timeline instead of scrolling the page", () => {
+test("editing timeline follow remains supplemental to lyric-line follow", () => {
   const app = readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const captureSource = app.match(/function capture\(index = state\.activeIndex, field = "start"\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(captureSource, /render\(false\);/);
   assert.match(captureSource, /followTimelineToPlayhead\(\{ force: true, behavior: "auto" \}\)/);
-  assert.doesNotMatch(captureSource, /scrollIntoView/);
   assert.match(app, /timelineFollowScrollTarget\(\{[\s\S]*?enabled: state\.followTimeline,[\s\S]*?mode: state\.timelineMode,/);
 });
 test("timeline exposes full and edit modes plus beta candidate branding", () => {
@@ -293,11 +327,11 @@ test("timeline exposes full and edit modes plus beta candidate branding", () => 
   assert.match(html, /data-timeline-mode="full"/);
   assert.match(html, /data-timeline-mode="edit"/);
   assert.match(html, /音に、<br><em>言葉の居場所をつくる。<\/em>/);
-  assert.match(html, /BETA CANDIDATE \/ 2\.3\.2/);
-  assert.match(html, /Lyric SRT Studio v2\.3\.2 β候補版/);
-  assert.match(html, /styles\.css\?v=2\.3\.2/);
-  assert.match(html, /srt-core\.js\?v=2\.3\.2/);
-  assert.match(html, /app\.js\?v=2\.3\.2/);
+  assert.match(html, /BETA CANDIDATE \/ 2\.3\.3/);
+  assert.match(html, /Lyric SRT Studio v2\.3\.3 β候補版/);
+  assert.match(html, /styles\.css\?v=2\.3\.3/);
+  assert.match(html, /srt-core\.js\?v=2\.3\.3/);
+  assert.match(html, /app\.js\?v=2\.3\.3/);
   assert.match(css, /\.timeline-block\.just-recorded/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });

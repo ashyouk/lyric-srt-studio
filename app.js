@@ -1,10 +1,10 @@
 const {
   analyzeProject,
   buildTimelineBlocks,
+  findNextUnrecordedIndex,
   isTime,
   lyricDraftInfo,
   makeSrt,
-  nextTimelineFollowState,
   resolveEnd,
   timelineFollowScrollTarget,
   validateLines,
@@ -50,9 +50,9 @@ const state = {
   followTimeline: preferences.followTimeline ?? (preferences.followCapture !== false),
   timelineMode: preferences.timelineMode === "edit" ? "edit" : "full",
 };
-if (state.followTimeline) state.timelineMode = "edit";
 
 let waveformFrame = null;
+let lyricFollowFrame = null;
 let toastTimer = null;
 let saveTimer = null;
 let timelineFlashTimer = null;
@@ -224,34 +224,31 @@ function savePreferences() {
   } catch { /* Preferences remain available for this session. */ }
 }
 
-function updateTimelineFollowControls() {
+function updateLyricFollowControls() {
+  const label = state.followTimeline ? "ON" : "OFF";
+  const description = `歌詞行追従：${label}。記録後に次の歌詞行を画面へ表示する`;
   [$("#capture-follow"), $("#floating-follow")].forEach((button) => {
     button.classList.toggle("enabled", state.followTimeline);
     button.ariaPressed = String(state.followTimeline);
+    button.ariaLabel = description;
+    button.title = description;
   });
-  $("#capture-follow-state").textContent = state.followTimeline ? "ON" : "OFF";
-  $("#floating-follow-state").textContent = state.followTimeline ? "ON" : "OFF";
+  $("#capture-follow-state").textContent = label;
+  $("#floating-follow-state").textContent = label;
 }
 
-function toggleTimelineFollow() {
-  const next = nextTimelineFollowState(state.followTimeline, state.timelineMode);
-  const modeChanged = next.mode !== state.timelineMode;
-  state.followTimeline = next.enabled;
-  state.timelineMode = next.mode;
+function toggleLyricFollow() {
+  state.followTimeline = !state.followTimeline;
   savePreferences();
-  updateTimelineFollowControls();
-  updateTimelineModeControls();
-  if (modeChanged) {
-    renderTimeline();
-    drawWaveform();
-  }
+  updateLyricFollowControls();
   if (state.followTimeline) {
+    followActiveLyricLine({ behavior: "smooth" });
     followTimelineToPlayhead({ force: true, behavior: "smooth" });
-    setStatus("タイムライン追従をONにしました。編集表示で再生位置を追いかけます。");
-    showToast("タイムライン追従：ON");
+    setStatus("歌詞行追従をONにしました。記録後に次の歌詞行を表示します。");
+    showToast("歌詞行追従：ON");
   } else {
-    setStatus("タイムライン追従をOFFにしました。表示位置を固定します。");
-    showToast("タイムライン追従：OFF");
+    setStatus("歌詞行追従をOFFにしました。画面位置を固定します。");
+    showToast("歌詞行追従：OFF");
   }
 }
 
@@ -267,21 +264,13 @@ function updateTimelineModeControls() {
 function setTimelineMode(mode) {
   if (!["full", "edit"].includes(mode) || state.timelineMode === mode) return;
   state.timelineMode = mode;
-  const disabledFollow = mode === "full" && state.followTimeline;
-  if (disabledFollow) state.followTimeline = false;
   savePreferences();
   updateTimelineModeControls();
-  updateTimelineFollowControls();
   renderTimeline();
   drawWaveform();
   if (mode === "edit" && state.followTimeline) followTimelineToPlayhead({ force: true, behavior: "smooth" });
   else timelineViewport.scrollLeft = 0;
-  if (disabledFollow) {
-    setStatus("全体表示に切り替え、タイムライン追従をOFFにしました。");
-    showToast("タイムライン追従：OFF");
-  } else {
-    setStatus(mode === "edit" ? "編集表示に切り替えました。横へ動かして細部を確認できます。" : "曲全体を表示しました。");
-  }
+  setStatus(mode === "edit" ? "編集表示に切り替えました。横へ動かして細部を確認できます。" : "曲全体を表示しました。");
 }
 
 function showToast(message, action = null) {
@@ -335,11 +324,18 @@ function capture(index = state.activeIndex, field = "start") {
   }
   const time = Number(player.currentTime.toFixed(3));
   pushChange(index, field, time, field === "start" ? "開始時刻の記録" : "終了時刻の記録");
-  if (field === "start") recentlyRecordedId = state.lines[index]?.id || null;
-  if (field === "start") state.activeIndex = Math.min(index + 1, state.lines.length - 1);
-  else state.activeIndex = index;
+  if (field === "start") {
+    recentlyRecordedId = state.lines[index]?.id || null;
+    const nextIndex = findNextUnrecordedIndex(state.lines, index + 1);
+    state.activeIndex = nextIndex >= 0 ? nextIndex : index;
+  } else {
+    state.activeIndex = index;
+  }
   render(false);
-  if (field === "start" && state.followTimeline) followTimelineToPlayhead({ force: true, behavior: "auto" });
+  if (field === "start" && state.followTimeline) {
+    followActiveLyricLine({ behavior: "auto" });
+    followTimelineToPlayhead({ force: true, behavior: "auto" });
+  }
   saveLocal();
   const kind = field === "start" ? "開始" : "終了";
   setStatus(`${index + 1}行目の${kind}を${timeLabel(time)}に記録しました。`);
@@ -434,21 +430,27 @@ function selectLine(index, scroll = false) {
   if (scroll) requestAnimationFrame(() => rows.children[state.activeIndex]?.scrollIntoView({ behavior: "smooth", block: "center" }));
 }
 
-function nextUnrecordedIndex() {
-  if (!state.lines.length) return -1;
-  for (let offset = 0; offset < state.lines.length; offset += 1) {
-    const index = (state.activeIndex + offset) % state.lines.length;
-    if (!isTime(state.lines[index].start)) return index;
-  }
-  return state.lines.length - 1;
-}
-
 function goToNextUnrecorded() {
-  const index = nextUnrecordedIndex();
-  if (index < 0) return setStatus("先に歌詞を反映してください。");
-  const allRecorded = state.lines.every((line) => isTime(line.start));
+  if (!state.lines.length) return setStatus("先に歌詞を反映してください。");
+  const nextIndex = findNextUnrecordedIndex(state.lines, state.activeIndex);
+  const allRecorded = nextIndex < 0;
+  const index = allRecorded ? state.lines.length - 1 : nextIndex;
   selectLine(index, true);
   setStatus(allRecorded ? "すべて記録済みです。最後の行へ移動しました。" : `${index + 1}行目の未記録行へ移動しました。`);
+}
+
+function followActiveLyricLine({ behavior = "auto" } = {}) {
+  if (!state.lines.length) return;
+  if (lyricFollowFrame !== null) cancelAnimationFrame(lyricFollowFrame);
+  lyricFollowFrame = requestAnimationFrame(() => {
+    lyricFollowFrame = null;
+    const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    rows.children[state.activeIndex]?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : behavior,
+      block: "center",
+      inline: "nearest",
+    });
+  });
 }
 
 function scrollToActiveLine() {
@@ -656,7 +658,7 @@ function updateFocus() {
   $("#duration-time").textContent = state.duration > 0 ? timeLabel(state.duration) : "--:--.---";
   updateHistoryControls();
   updateDockPlayback();
-  updateTimelineFollowControls();
+  updateLyricFollowControls();
 }
 
 function updateHistoryControls() {
@@ -935,8 +937,8 @@ $("#go-next-unrecorded").onclick = goToNextUnrecorded;
 $("#clear-all-times").onclick = clearAllTimes;
 $("#capture-active").onclick = () => capture();
 $("#capture-floating").onclick = () => capture();
-$("#capture-follow").onclick = toggleTimelineFollow;
-$("#floating-follow").onclick = toggleTimelineFollow;
+$("#capture-follow").onclick = toggleLyricFollow;
+$("#floating-follow").onclick = toggleLyricFollow;
 $("#undo-capture").onclick = undo;
 $("#redo-capture").onclick = redo;
 $("#floating-undo").onclick = undo;

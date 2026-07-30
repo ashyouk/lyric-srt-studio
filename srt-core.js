@@ -96,12 +96,14 @@ function parseLyricDrafts(jpRaw, enRaw) {
   return lyricDraftInfo(jpRaw, enRaw).rows;
 }
 
-function nextTimelineFollowState(currentEnabled, currentMode) {
-  const enabled = !currentEnabled;
-  return {
-    enabled,
-    mode: enabled ? "edit" : (currentMode === "edit" ? "edit" : "full"),
-  };
+function findNextUnrecordedIndex(lines, startIndex = 0) {
+  if (!Array.isArray(lines) || !lines.length) return -1;
+  const firstIndex = ((Number(startIndex) || 0) % lines.length + lines.length) % lines.length;
+  for (let offset = 0; offset < lines.length; offset += 1) {
+    const index = (firstIndex + offset) % lines.length;
+    if (!isTime(lines[index]?.start)) return index;
+  }
+  return -1;
 }
 
 function timelineFollowScrollTarget({
@@ -191,12 +193,12 @@ function analyzeProject(lines, duration = 0) {
 globalThis.LyricSrtCore = {
   analyzeProject,
   buildTimelineBlocks,
+  findNextUnrecordedIndex,
   formatSrtTime,
   isTime,
   lineText,
   lyricDraftInfo,
   makeSrt,
-  nextTimelineFollowState,
   parseLyricDrafts,
   resolveEnd,
   resolveEndDetails,
