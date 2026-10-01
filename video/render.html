@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face {font-family:"Studio Noto";src:url("./fonts/NotoSansJP.ttf");font-weight:100 900;font-display:block}
+html,body {margin:0;width:1920px;height:1080px;background:transparent;overflow:hidden}
+canvas {display:block;width:1920px;height:1080px}
+</style></head><body><canvas width="1920" height="1080"></canvas>
+<script type="module">
+import {drawLyrics} from "./core.js";
+const canvas=document.querySelector("canvas"),ctx=canvas.getContext("2d");
+await document.fonts.load('700 62px "Studio Noto"');
+await document.fonts.load('500 62px "Studio Noto"');
+window.drawFrame=(project,time)=>drawLyrics(ctx,project,time);
+window.renderReady=true;
+</script></body></html>
