@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lyric Video Studio — 開発試作</title><link rel="stylesheet" href="studio.css"></head>
+<title>Lyric Video Studio — 開発試作</title><link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="studio.css?v=0.2"></head>
 <body>
-<header><a class="brand" href="./">LYRIC <span>VIDEO STUDIO</span></a><span class="tag">LOCAL PC / PROTOTYPE 0.1</span><a href="/">手動SRT版</a></header>
+<header><a class="brand" href="./">LYRIC <span>VIDEO STUDIO</span></a><span class="tag">LOCAL PC / PROTOTYPE 0.2</span><a href="/">手動SRT版</a></header>
 <main>
 <section class="intro"><div><p class="eyebrow">音に、言葉の居場所をつくる。</p><h1>あなたのMVに、<br>歌詞を重ねる。</h1><p>音源と正しい歌詞を照合して、最初のタイミングを。<br>聞いて、少し直して、歌詞入りMP4へ。</p></div><div class="privacy"><strong>この画面の処理先は、起動したPCです。</strong><p>素材は処理用PCへコピーされ、そこで同期・動画合成を行います。外部の音声APIは使用しません。スマホから接続した場合も処理先はPCです。</p><small id="engine-state">処理用PCとの接続を確認中…</small></div></section>
-<nav class="steps" aria-label="制作の流れ"><a href="#prepare">01 素材と歌詞</a><a href="#preview">02 プレビュー</a><a href="#editing">03 確認・修正</a><a href="#output">04 保存</a></nav>
+<nav class="steps" aria-label="制作の流れ"><a href="#prepare" data-tab-target="production">01 素材と歌詞</a><a href="#preview" data-tab-target="production">02 プレビュー</a><a href="#editing" data-tab-target="editing">03 確認・修正</a><a href="#output" data-tab-target="production">04 保存</a></nav>
+<div class="app-tabs" role="tablist" aria-label="作業画面"><button id="tab-production" role="tab" aria-controls="production-panel" aria-selected="true">制作</button><button id="tab-editing" role="tab" aria-controls="editing-panel" aria-selected="false" tabindex="-1">タイミング修正</button></div>
+<section id="production-panel" role="tabpanel" aria-labelledby="tab-production">
 <div class="workspace">
 <section id="prepare" class="panel"><div class="panel-title"><h2>01 素材と歌詞</h2><span>5分以内・1GB以内</span></div>
 <label class="file-pick">MVまたは音源を選ぶ<input id="media-file" type="file"><small>PCでの検証形式：H.264＋AACのMP4 / WAV / MP3 / M4A。iOS実機は未確認です。</small></label><p id="media-name" class="hint">素材が未選択です。</p>
@@ -18,25 +20,32 @@
 </section>
 <div class="preview-column">
 <section id="preview" class="panel"><div class="panel-title"><h2>02 プレビュー</h2><span>16:9 / 1920×1080</span></div>
+<div class="buttons preview-actions"><button id="open-preview">別窓で開く</button><button id="return-preview" hidden>画面内に戻す</button></div><p id="preview-message" class="hint local-message"></p><p id="detached-note" class="hint" hidden>別窓にプレビューを表示しています。音と再生位置はこの画面で管理します。</p>
 <div id="stage" class="stage"><video id="video" playsinline preload="metadata"></video><img id="background" alt="背景画像" hidden><canvas id="canvas" width="1920" height="1080" aria-label="歌詞プレビュー"></canvas></div><audio id="audio" preload="metadata"></audio>
 <input id="seek" class="seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="再生位置">
 <div class="transport"><button id="play" type="button">▶ 再生</button><button id="back" type="button">−3秒</button><button id="forward" type="button">＋3秒</button><output id="time">00:00.000 / 00:00.000</output></div>
 <p id="preview-note" class="hint">自動推定の字幕も表示します。「試写MP4」は要確認の候補を含められます。確認済みMP4とSRTは確認済みの行だけを使用します。</p>
 </section>
 <section class="panel"><div class="panel-title"><h2>歌詞の見た目</h2><span>再同期は不要です</span></div>
+<label for="font-choice">歌詞フォント</label><select id="font-choice" aria-describedby="font-note"><option value="noto-sans">Noto Sans JP · ゴシック</option><option value="noto-serif">Noto Serif JP · 明朝</option><option value="zen-maru">Zen Maru Gothic · 丸ゴシック</option></select><div id="font-samples" class="font-samples" aria-label="実際の書体で選ぶ"></div><p id="font-note" class="hint">全候補が日本語・英語対応。プレビューとMP4に同じ同梱フォントを使います。絵文字や特殊文字は非対応の場合があります。<a href="fonts/README.md" target="_blank" rel="noopener noreferrer">フォントとライセンス</a></p>
 <div class="style-grid"><label>表示スタイル<select id="style-mode"><option value="subtitle">通常字幕</option><option value="scroll">スクロール歌詞</option></select></label><label>文字サイズ<input id="font-size" type="range" min="24" max="120" value="62"></label><label>文字色<input id="font-color" type="color" value="#ffffff"></label><label>縁取り・影<input id="shadow" type="range" min="0" max="12" value="6"></label><label>表示位置<input id="position" type="range" min="0.15" max="0.85" step="0.01" value="0.78"></label><label>歌詞領域の幅<input id="lyric-width" type="range" min="0.3" max="0.95" step="0.01" value="0.82"></label><label>背景色<input id="background-color" type="color" value="#101622"></label></div>
 </section>
 </div></div>
-<section class="panel job-panel" id="job-panel" hidden><strong id="job-status" role="status"></strong><progress id="job-progress" hidden></progress><button id="cancel" type="button">処理をキャンセル</button><a id="download-video" hidden>MP4を保存</a></section>
-<section id="editing" class="panel"><div class="panel-title"><h2>03 聴いて、必要な行だけ修正</h2><span id="review-count">0行</span></div><div class="buttons"><button id="next-review">次の要確認行</button><button id="undo" disabled>↶ 戻る</button><button id="redo" disabled>↷ やり直す</button></div><div id="rows" class="rows"><p class="hint">素材と歌詞を選ぶと、ここで時刻を確認・修正できます。</p></div></section>
 <section id="output" class="panel"><div class="panel-title"><h2>04 保存</h2><span>試写と確認済み出力を区別</span></div>
 <label>MP4の書き出し範囲<select id="export-mode"><option value="audition">試写：要確認の時刻候補も含める</option><option value="confirmed">確認済みの歌詞行だけ</option></select></label>
 <p class="hint">試写は自動候補の確認用です。書き出しても行は確認済みになりません。時刻のない行は含められません。SRTは確認済みの行だけを書き出します。</p>
 <div class="buttons"><button id="export" class="primary">歌詞入りMP4を作る</button><button id="srt">SRTを保存</button><select id="srt-language" aria-label="SRTの言語"><option value="original">入力した歌詞</option><option value="jp">日本語（旧プロジェクト）</option><option value="en">English（旧プロジェクト）</option><option value="bilingual">日英併記（旧プロジェクト）</option></select><button id="save-project">プロジェクトを保存</button><label class="file-button">プロジェクトを開く<input id="project-file" type="file" accept="application/json,.json"></label></div>
 <p class="hint">MP4：H.264＋AAC・横長1080p・30fps。縦動画や4:3素材は、切り取りや引き伸ばしをせず余白を付けます。素材本体はプロジェクトに含まれません。再読み込み後は選び直してください。</p>
 </section>
+</section>
+<section id="editing-panel" role="tabpanel" aria-labelledby="tab-editing" hidden>
+<section id="editing" class="panel"><div class="panel-title"><h2>03 聴いて、必要な行だけ修正</h2><span id="review-count">0行</span></div>
+<div class="edit-workspace"><div class="edit-monitor"><div class="stage compact-stage"><canvas id="edit-canvas" width="1920" height="1080" aria-label="修正用コンパクトプレビュー"></canvas></div><p id="edit-selected" class="target-label">選択行：未選択</p><p id="edit-playing" class="hint">再生中の歌詞行：なし</p><input id="edit-seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="修正画面の再生位置"><div class="transport"><button id="edit-play">▶ 再生</button><button id="edit-listen">この行を聴く</button><output id="edit-time">00:00.000</output></div><div class="buttons"><button id="edit-open-preview">別窓で開く</button><button id="edit-return-preview" hidden>画面内に戻す</button></div><p id="edit-message" class="hint local-message"></p><p class="hint edit-help">行番号で開始の0.5秒手前へ移動。「この行を聴く」で試聴。行全体の±0.1秒は表示時間を保ちます。</p></div>
+<div class="edit-list"><div class="buttons"><button id="filter-all" aria-pressed="true">すべて</button><button id="filter-review" aria-pressed="false">要確認</button><button id="next-review">次の要確認行</button><button id="undo" disabled>↶ 戻る</button><button id="redo" disabled>↷ やり直す</button></div><p id="quality-count" class="hint"></p><div id="rows" class="rows"><p class="hint">素材と歌詞を選ぶと、ここで時刻を確認・修正できます。</p></div></div></div>
+</section></section>
+<section class="panel job-panel" id="job-panel" hidden><strong id="job-status" role="status"></strong><progress id="job-progress" hidden></progress><button id="cancel" type="button">処理をキャンセル</button><a id="download-video" hidden>MP4を保存</a></section>
 <p id="message" class="message" role="status" aria-live="polite">素材を選んで、歌詞を貼り付けてください。</p>
 <footer>開発試作です。歌唱の精度を保証する販売版ではありません。 <a href="/">v2.3.3 手動SRT版へ</a></footer>
 </main>
-<aside class="floating" aria-label="固定編集操作"><div><small>現在の対象行</small><strong id="active-text">歌詞が未入力です</strong></div><button id="fixed-play">▶</button><button id="fixed-undo" disabled title="元に戻す" aria-label="元に戻す">↶</button><button id="fixed-redo" disabled title="やり直す" aria-label="やり直す">↷</button><button id="record-start" class="primary">開始を記録</button><button id="record-end">終了を記録</button></aside>
-<script type="module" src="studio.js"></script></body></html>
+<aside class="floating" aria-label="固定編集操作"><div><small>選択行 <span id="playing-line">/ 再生中：なし</span></small><strong id="active-text">歌詞が未入力です</strong></div><button id="fixed-play">▶</button><button id="fixed-undo" disabled title="元に戻す" aria-label="元に戻す">↶</button><button id="fixed-redo" disabled title="やり直す" aria-label="やり直す">↷</button><button id="record-start" class="primary">開始を記録</button><button id="record-end">終了を記録</button></aside>
+<script type="module" src="studio.js?v=0.2"></script></body></html>

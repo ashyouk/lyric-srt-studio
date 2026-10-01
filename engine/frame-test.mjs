@@ -15,6 +15,8 @@ try {
   const page = await browser.newPage({viewport: {width: 1920, height: 1080}, deviceScaleFactor: 1});
   await page.goto((process.env.STUDIO_BASE_URL || "http://127.0.0.1:8765") + "/video/render.html");
   await page.waitForFunction(() => window.renderReady);
+  for (const fontId of ["noto-sans","noto-serif","zen-maru"]) {
+  project.style.fontId=fontId;
   for (const mode of ["subtitle", "scroll"]) {
     project.style.mode = mode;
     for (const time of [0, 1, 2.65, 4.8]) {
@@ -37,9 +39,10 @@ try {
       // A backwards seek must regenerate the identical frame, not retain animation state.
       await captureFrame(page, project, time + .1);
       assert.deepEqual(await captureFrame(page, project, time), direct);
-      console.log(`PASS ${mode} @ ${time}s: exact PNG pixels and deterministic seek`);
+      console.log(`PASS ${fontId} ${mode} @ ${time}s: exact PNG pixels and deterministic seek`);
       checks += 2;
     }
+  }
   }
   console.log(`COMPLETE ${checks} frame checks`);
 } finally {await browser.close();}

@@ -13,6 +13,7 @@ try{
   await page.locator('#background-file').setInputFiles(resolve('.studio-data/verification/background.jpg'));
   await page.waitForFunction(()=>document.querySelector('#background').naturalWidth>0);
   check('JPEG background uploads and decodes',await page.evaluate(()=>window.studio.snapshot().assets.background.name==='background.jpg'));
+  await page.locator('#tab-editing').click();
   for(const [width,height] of [[320,740],[375,812],[390,844],[768,1024],[1024,768],[1440,1100]]){
     await page.setViewportSize({width,height});
     check('no horizontal overflow at '+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

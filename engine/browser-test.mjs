@@ -29,6 +29,7 @@ try {
   await page.locator("#play").click();await page.waitForTimeout(400);await page.locator("#play").click();
   check("pause resumes media time without reset",await page.evaluate(()=>window.studio.currentTime()>55));
   const firstStart=aligned.lines[0].start;
+  await page.locator("#tab-editing").click();
   await page.locator('.lyric-row[data-id="line-0"] button[data-field="start"][data-delta=".1"]').click();
   await page.locator('.lyric-row[data-id="line-0"] button[data-field="start"][data-delta=".1"]').click();
   await page.locator("#fixed-undo").click();await page.locator("#fixed-undo").click();
@@ -41,6 +42,7 @@ try {
   const project=await page.evaluate(()=>window.studio.snapshot());
   check("confirmed intervals feed export",project.lines.every(l=>!l.review));
   await writeFile(resolve(output,"confirmed-project.json"),JSON.stringify(project,null,2));
+  await page.locator("#tab-production").click();
   const savedEvent=page.waitForEvent("download");await page.locator("#save-project").click();
   const saved=await savedEvent;await saved.saveAs(resolve(output,"saved-project.json"));
   const savedJson=JSON.parse(await readFile(resolve(output,"saved-project.json"),"utf8"));

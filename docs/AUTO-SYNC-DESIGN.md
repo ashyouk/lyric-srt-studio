@@ -54,7 +54,7 @@ MP4の出力範囲は、要確認の有効な候補も含む「試写」と「�
 |librosa|ISC|
 |nagisa / FastAPI / truststore|MIT|
 |Playwright|Apache-2.0。使用ブラウザ本体はその配布条件に従う|
-|Noto Sans JP|SIL OFL-1.1。公式Google Fonts配布の未改変フォントとOFL.txtを同梱|
+|Noto Sans JP / Noto Serif JP / Zen Maru Gothic|SIL OFL-1.1。公式Google Fonts配布の未改変フォントと各OFL通知を同梱。[ファイル・著作権・取得元](../video/fonts/README.md)。3書体とも日本語・英語対応、同じバイナリをプレビューと動画に使用|
 |FFmpeg / libx264|今回の外部FFmpegビルドはGPLv3構成。リポジトリにはバイナリを同梱しない。販売用インストーラーへ同梱する場合はソース提供・通知等を設計する必要あり|
 
 フォント：[公式配布](https://github.com/google/fonts/tree/main/ofl/notosansjp)、FFmpeg：[公式ライセンス説明](https://ffmpeg.org/legal.html)。オープンなライセンスは商用利用を一律禁止しませんが、販売パッケージの同梱物・ライセンス表示・コーデックの特許条件・入力作品の権利は別途確認が必要です。この試作だけで販売可否の法的保証はしません。Windows音声合成は言語経路のテストだけで、アプリの同期や出力では使いません。

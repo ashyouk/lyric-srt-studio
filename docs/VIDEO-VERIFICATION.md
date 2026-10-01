@@ -2,6 +2,8 @@
 
 2026-10-01／Windows 10、16GB RAM、CPU処理、Python 3.13.2、Node 22.17.1、FFmpeg 8.1.2、Edge headless。GPUを使った性能の検証ではありません。
 
+制作／修正タブ・3書体・別窓プレビューを追加した **試作0.2の最新追試** は、[操作改善の検証報告](VIDEO-EDITING-VERIFICATION.md)を参照してください。以下の数値は初回試作の記録です。
+
 公開β版の基準：`3f0ad7670afc2cdbfe8db676e0781da105f4c8c7`（v2.3.3）。作業開始時はmain・origin/mainが一致し、未コミット変更なし。AGENTS.mdはありませんでした。作業ブランチ：`agent/lyric-video-prototype`。ルートの `index.html / app.js / styles.css / srt-core.js / srt-core.test.js` は変更していません。
 
 ## 結論

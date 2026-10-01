@@ -1,7 +1,8 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {parseLyrics, newProject, loadProject, saveProject, applyAlignment, editTiming, confirmLine,
-  History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject} from "./core.js";
+  History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject, shiftTiming, timingIssues} from "./core.js";
+import {FONTS,normalizeFont,fontFamily} from "./font-catalog.js";
 
 const fixture = () => {
   const p = newProject("星よ、Hello world\n同じ歌詞\n同じ歌詞"); p.duration = 20;
@@ -124,4 +125,41 @@ test("SRT and final video consume only the same confirmed cue intervals", () => 
   assert.equal(cues(p,true).length,1);
   assert.match(exportSrt(p),/00:00:02,000 --> 00:00:04,000/);
   assert.doesNotMatch(exportSrt(p),/同じ歌詞/);
+});
+
+test("whole-row nudges preserve duration, text and automatic estimate without mutating input",()=>{
+  const original=fixture();original.lines[0].auto={start:1.9,end:4.1};
+  const later=shiftTiming(original,"line-0",.1),earlier=shiftTiming(later,"line-0",-.1);
+  assert.equal(later.lines[0].start,2.1);assert.equal(later.lines[0].end,4.1);
+  assert.ok(Math.abs(later.lines[0].end-later.lines[0].start-2)<1e-9);
+  assert.equal(original.lines[0].start,2);assert.equal(earlier.lines[0].end,4);
+  assert.deepEqual(later.lines[0].auto,original.lines[0].auto);
+  assert.deepEqual(later.lines[0].manual,{start:true,end:true});assert.equal(later.lines[0].review,true);
+  assert.equal(later.lines[0].text,original.lines[0].text);
+  original.lines[0].start=2.123456;original.lines[0].end=4.987654;
+  const precise=shiftTiming(original,"line-0",.1);
+  assert.ok(Math.abs((precise.lines[0].end-precise.lines[0].start)-(original.lines[0].end-original.lines[0].start))<1e-9);
+});
+test("whole-row nudge rejects missing, reversed, negative and out-of-media intervals",()=>{
+  const p=fixture();assert.throws(()=>shiftTiming(p,"line-0",-2.1));assert.throws(()=>shiftTiming(p,"line-2",7));
+  p.lines[0].end=null;assert.throws(()=>shiftTiming(p,"line-0",.1));
+  p.lines[0].end=1;assert.throws(()=>shiftTiming(p,"line-0",.1));assert.throws(()=>shiftTiming(p,"line-1",NaN));
+});
+test("whole-row shifts are one Undo step and report overlap through the existing quality checker",()=>{
+  const h=new History();const p=fixture();p.lines[1].start=4.05;
+  const later=h.change(p,shiftTiming(p,"line-0",.1));assert.ok(timingIssues(later).some(i=>i.index===0&&i.code==="overlap"));
+  const restored=h.undo(later);assert.equal(restored.lines[0].start,2);assert.equal(restored.lines[0].end,4);
+  assert.equal(h.redo(restored).lines[0].end,4.1);
+});
+test("every supported font survives project save/load; old and unknown fonts default to Noto Sans",()=>{
+  assert.equal(FONTS.length,3);assert.ok(FONTS.every(f=>f.japanese));
+  for(const font of FONTS){const p=fixture();p.style.fontId=font.id;const loaded=loadProject(saveProject(p));assert.equal(loaded.style.fontId,font.id);assert.equal(fontFamily(font.id),font.family);}
+  const old=fixture();delete old.style.fontId;assert.equal(loadProject(old).style.fontId,"noto-sans");
+  old.style.fontId="nonportable-system-font";assert.equal(loadProject(old).style.fontId,"noto-sans");assert.equal(normalizeFont("invalid"),"noto-sans");
+});
+test("font-dependent wrapping recalculates scroll geometry without changing timings or lyrics",()=>{
+  const p=fixture();p.style.mode="scroll";p.style.width=.3;p.lines[0].text="あいうえおかきくけこさしすせそたちつてと";
+  const before=JSON.stringify(p),narrow=layoutScene(p,7.5,s=>s.length*20),wide=layoutScene(p,7.5,s=>s.length*80);
+  assert.ok(wide[0].wrapped.length>narrow[0].wrapped.length);assert.notEqual(wide[0].y,narrow[0].y);
+  assert.equal(wide.find(l=>l.active).y,1080*p.style.y);assert.equal(JSON.stringify(p),before);
 });

@@ -1,6 +1,7 @@
 import "../srt-core.js";
+import {normalizeFont, fontFamily} from "./font-catalog.js";
 
-export const DEFAULT_STYLE = Object.freeze({mode: "subtitle", fontSize: 62, color: "#ffffff",
+export const DEFAULT_STYLE = Object.freeze({mode: "subtitle", fontId:"noto-sans", fontSize: 62, color: "#ffffff",
   shadow: 6, y: .78, width: .82, background: "#101622"});
 export const validTime = value => (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value));
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -26,7 +27,7 @@ export function newProject(raw = "") {
 
 export function normalizeStyle(value = {}) {
   const color = candidate => /^#[0-9a-f]{6}$/i.test(candidate || "");
-  return {mode: value.mode === "scroll" ? "scroll" : "subtitle",
+  return {mode: value.mode === "scroll" ? "scroll" : "subtitle", fontId:normalizeFont(value.fontId),
     fontSize: clamp(Number(value.fontSize) || 62, 24, 120),
     color: color(value.color) ? value.color : DEFAULT_STYLE.color,
     shadow: clamp(Number(value.shadow) || 0, 0, 12),
@@ -118,6 +119,22 @@ export function confirmLine(project, id) {
   return next;
 }
 
+export function shiftTiming(project, id, delta) {
+  const row=project.lines.find(l=>l.id===id);
+  if(!row || !validTime(row.start) || !validTime(row.end) || row.end<=row.start || !Number.isFinite(delta))
+    throw new Error("先に正しい開始・終了時刻を指定してください。");
+  // Preserve sub-millisecond imported intervals; a shift is not edge rounding.
+  const start=Number((Number(row.start)+delta).toFixed(9)), end=Number((Number(row.end)+delta).toFixed(9));
+  if(start<0 || end>project.duration || end<=start) throw new Error("行全体を素材の範囲内で移動してください。");
+  const next=clone(project),target=next.lines.find(l=>l.id===id);
+  Object.assign(target,{start,end,manual:{start:true,end:true},review:true,reasons:["手動修正した区間を確認してください。"]});
+  return next;
+}
+
+export function timingIssues(project) {
+  return globalThis.LyricSrtCore.analyzeProject(project.lines.map(l=>({jp:l.text,en:"",start:l.start,end:l.end})),project.duration).issues;
+}
+
 export function cues(project, confirmedOnly = false) {
   return project.lines.filter(l => validTime(l.start) && validTime(l.end) && l.end > l.start &&
     l.start >= 0 && l.end <= project.duration + .15 && (!confirmedOnly || !l.review));
@@ -192,7 +209,8 @@ export function layoutScene(project, time, measure) {
 export function drawLyrics(ctx, project, time) {
   const style = normalizeStyle(project.style), font = style.fontSize;
   ctx.clearRect(0, 0, 1920, 1080);
-  ctx.font = `600 ${font}px "Studio Noto"`;
+  const family=fontFamily(style.fontId);
+  ctx.font = `700 ${font}px "${family}"`;
   const layout = layoutScene(project, time, text => ctx.measureText(text).width);
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -200,7 +218,7 @@ export function drawLyrics(ctx, project, time) {
   ctx.save();
   if (style.mode === "scroll") {ctx.beginPath(); ctx.rect(0, Math.max(0, top), 1920, Math.min(1080, bottom) - Math.max(0, top)); ctx.clip();}
   for (const row of layout) {
-    ctx.font = `${row.active ? 700 : 500} ${font}px "Studio Noto"`;
+    ctx.font = `${row.active ? 700 : 500} ${font}px "${family}"`;
     row.wrapped.forEach((text, i) => {
       const y = row.y + i * font * 1.45;
       const edge = style.mode === "scroll" ? clamp(Math.min(y - top, bottom - y) / 100, 0, 1) : 1;

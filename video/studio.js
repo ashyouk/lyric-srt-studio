@@ -1,12 +1,22 @@
 import {newProject,loadProject,saveProject,parseLyrics,applyAlignment,editTiming,confirmLine,
-  cues,exportSrt,drawLyrics,History,validTime} from "./core.js";
+  cues,exportSrt,drawLyrics,History,validTime,activeCue,shiftTiming,timingIssues} from "./core.js";
+import {FONTS,normalizeFont} from "./font-catalog.js";
+import {ensureFont} from "./fonts.js";
+import {drawComposite} from "./preview-render.js";
 
 const $=selector=>document.querySelector(selector);
 const STORAGE="lyric-video-studio-prototype-v1";
 let project=newProject(), selected=null, jobId=null, busy=false;
+let activeTab="production", rowFilter="all", previewWindow=null, previewPoll=null, fontRequest=0;
+// LAN HTTP is not a secure context: randomUUID may not exist there.
+const previewName=`lyric-preview-${globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+const loadedFonts=new Set();
 const history=new History();
 const video=$("#video"),audio=$("#audio"),canvas=$("#canvas"),ctx=canvas.getContext("2d");
-const message=(text,error=false)=>{$("#message").textContent=text;$("#message").classList.toggle("error",error);};
+const editCtx=$("#edit-canvas").getContext("2d"), editOverlay=document.createElement("canvas");
+editOverlay.width=1920;editOverlay.height=1080;
+const editOverlayCtx=editOverlay.getContext("2d");
+const message=(text,error=false)=>{for(const id of ["#message","#edit-message","#preview-message"]){$(id).textContent=id==="#message"||error?text:"";$(id).classList.toggle("error",error);}};
 const timeLabel=t=>`${String(Math.floor(Math.max(0,t)/60)).padStart(2,"0")}:${(Math.max(0,t)%60).toFixed(3).padStart(6,"0")}`;
 const escape=text=>String(text??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const clock=()=>project.assets.media?.kind==="video"?video:audio;
@@ -20,8 +30,42 @@ async function api(path,options={}) {
 }
 const safely=fn=>async event=>{try{await fn(event);}catch(error){message(error.message,true);}};
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify(saveProject(project)));}catch{message("自動保存できません。プロジェクトファイルを保存してください。",true);}}
-function commit(next){project=history.change(project,next);persist();render();}
-function refreshHistory(){["#undo","#fixed-undo"].forEach(s=>$(s).disabled=!history.past.length);["#redo","#fixed-redo"].forEach(s=>$(s).disabled=!history.future.length);}
+function commit(next){if(JSON.stringify(next)===JSON.stringify(project))return;project=history.change(project,next);persist();render();}
+function refreshHistory(){["#undo","#fixed-undo"].forEach(s=>$(s).disabled=!history.past.length);["#redo","#fixed-redo"].forEach(s=>$(s).disabled=!history.future.length);$("#undo").textContent=`↶ 戻る ${history.past.length}`;$("#redo").textContent=`↷ やり直す ${history.future.length}`;}
+function switchTab(tab,focus=false){
+  activeTab=tab==="editing"?"editing":"production";
+  for(const name of ["production","editing"]){const active=name===activeTab;$("#"+name+"-panel").hidden=!active;const button=$("#tab-"+name);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;}
+  if(focus)$("#tab-"+activeTab).focus();draw();
+}
+function visualSource(){return project.assets.media?.kind==="video"?video:project.assets.background?.url?$("#background"):null;}
+function previewState(){return {project,time:clock().currentTime||0,paused:clock().paused,selected,playingId:activeCue(project,clock().currentTime||0)?.id||null};}
+function syncDetached(){const detached=Boolean(previewWindow&&!previewWindow.closed);$("#stage").hidden=detached;$("#detached-note").hidden=!detached;["#return-preview","#edit-return-preview"].forEach(s=>$(s).hidden=!detached);["#open-preview","#edit-open-preview"].forEach(s=>$(s).textContent=detached?"別窓を表示":"別窓で開く");}
+function previewClosed(child){
+  if(child&&child!==previewWindow)return;
+  previewWindow=null;if(previewPoll){clearInterval(previewPoll);previewPoll=null;}syncDetached();draw();
+}
+function returnPreview(){const child=previewWindow;previewClosed();if(child&&!child.closed)child.close();}
+function openPreview(){
+  if(previewWindow&&!previewWindow.closed){previewWindow.focus();return;}
+  previewWindow=window.open("./preview.html",previewName,"popup,width=1000,height=720,resizable=yes,scrollbars=yes");
+  if(!previewWindow){syncDetached();message("別窓がブロックされました。このサイトのポップアップを許可するか、画面内プレビューをご利用ください。",true);return;}
+  syncDetached();previewPoll=setInterval(()=>{if(previewWindow?.closed)previewClosed();},300);
+  message("別窓を開きました。再生と音声は親画面に一本化しています。");
+}
+async function chooseFont(id){
+  id=normalizeFont(id);const request=++fontRequest;$("#font-choice").value=id;
+  message("歌詞フォントを読み込んでいます…");try{await ensureFont(id);}catch(error){if(request===fontRequest)setStyleInputs();throw error;}loadedFonts.add(id);
+  if(request!==fontRequest)return;
+  project={...project,style:{...project.style,fontId:id}};persist();setStyleInputs();draw();message("フォントを変更しました。改行と行の高さを更新しました（再同期は不要です）。");
+}
+async function prepareProjectFont(){
+  const id=project.style.fontId;await ensureFont(id);loadedFonts.add(id);draw();
+}
+async function listenRow(id=selected){
+  const line=project.lines.find(l=>l.id===id);
+  if(!validTime(line?.start))throw new Error("先にこの行の開始時刻を指定してください。");
+  selectRow(id);if(clock().paused)await playback();
+}
 function unload(){video.pause();audio.pause();[video,audio].forEach(el=>{el.removeAttribute("src");el.load();});$("#background").removeAttribute("src");$("#background").hidden=true;}
 function attachMedia(){
   video.pause();audio.pause();
@@ -85,25 +129,40 @@ function record(field){
   if(!selected) throw new Error("歌詞行を選択してください。");
   commit(editTiming(project,selected,field,clock().currentTime));message(`選択行の${field==="start"?"開始":"終了"}を記録しました。`);
 }
-function render(){
-  if(!project.lines.some(l=>l.id===selected)) selected=project.lines[0]?.id;
+function selectionLabels(){
   const row=project.lines.find(l=>l.id===selected);
   $("#active-text").textContent=row?`${project.lines.indexOf(row)+1} · ${row.text}`:"歌詞が未入力です";
+  $("#edit-selected").textContent=row?`選択行 ${project.lines.indexOf(row)+1}：${row.text}`:"選択行：未選択";
+  document.querySelectorAll(".lyric-row").forEach(el=>el.classList.toggle("selected",el.dataset.id===selected));
+}
+function render(){
+  if(!project.lines.some(l=>l.id===selected)) selected=project.lines[0]?.id;
+  selectionLabels();
   $("#review-count").textContent=`${project.lines.length}行 / 要確認 ${project.lines.filter(l=>l.review).length} / 確認済み ${cues(project,true).length}`;
-  $("#rows").innerHTML=project.lines.length?project.lines.map((l,i)=>`<article class="lyric-row ${l.id===selected?"selected":""}" data-id="${escape(l.id)}">
+  const issues=timingIssues(project);
+  $("#quality-count").textContent=`品質チェック：${issues.filter(i=>i.severity==="error").length}件のエラー / ${issues.filter(i=>i.severity==="warning").length}件の注意（前後の重なりを含む）`;
+  ["all","review"].forEach(f=>$("#filter-"+f).setAttribute("aria-pressed",String(rowFilter===f)));
+  const visible=project.lines.map((l,i)=>({l,i})).filter(({l})=>rowFilter!=="review"||l.review);
+  $("#rows").innerHTML=visible.length?visible.map(({l,i})=>`<article class="lyric-row ${l.id===selected?"selected":""}" data-id="${escape(l.id)}">
     <button class="row-number" data-action="select" aria-label="${i+1}行目を選択して付近へ移動">${i+1}</button>
     <div><div class="row-text">${escape(l.text)}</div><span class="row-state ${!l.review?"confirmed":""}">${l.review?"要確認":"確認済み"}${l.manual.start||l.manual.end?" · 手動修正":""}</span></div>
-    <div class="row-tools">${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1">＋0.1</button></div></div>`).join("")}<button data-action="select">付近を再生</button><button data-action="confirm" ${!validTime(l.start)||!validTime(l.end)?"disabled":""}>確認済みにする</button></div>
-    <details class="row-details"><summary>照合用テキストと確認理由</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${timeLabel(l.auto.candidateStart??l.auto.start??0)} → ${timeLabel(l.auto.candidateEnd??l.auto.end??0)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
+    <div class="row-tools"><div class="row-shift"><button data-action="shift" data-delta="-.1" title="行全体の開始・終了を0.1秒早める">0.1秒早める</button><button data-action="shift" data-delta=".1" title="行全体の開始・終了を0.1秒遅らせる">0.1秒遅らせる</button></div>${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒早める">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒遅らせる">＋0.1</button></div></div>`).join("")}<button data-action="listen">この行を聴く</button><button data-action="confirm" ${!validTime(l.start)||!validTime(l.end)?"disabled":""}>確認済みにする</button></div>
+    ${issues.filter(issue=>issue.index===i).map(issue=>`<p class="row-details quality-warning">${escape(issue.message)}</p>`).join("")}
+    <details class="row-details"><summary>照合用テキストと確認理由</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${timeLabel(l.auto.candidateStart??l.auto.start??0)} → ${timeLabel(l.auto.candidateEnd??l.auto.end??0)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):rowFilter==="review"&&project.lines.length?"<p class='hint'>要確認の行はありません。「すべて」で任意の行を修正できます。</p>":"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
   refreshHistory();draw();
+  document.body.classList.toggle("row-input-focus",Boolean(document.activeElement?.closest("#rows input")));
 }
 function draw(){
   const current=clock().currentTime||0;
   $("#stage").style.background=project.style.background;
-  drawLyrics(ctx,project,current);
+  if(loadedFonts.has(project.style.fontId)){if(activeTab==="production"&&!$("#stage").hidden)drawLyrics(ctx,project,current);if(activeTab==="editing")drawComposite(editCtx,editOverlayCtx,project,current,visualSource());}
+  const active=activeCue(project,current),playing=active?`再生中の歌詞行 ${project.lines.indexOf(active)+1}：${active.text}`:"再生中の歌詞行：なし（前奏・間奏・後奏）";
+  $("#edit-playing").textContent=playing;$("#playing-line").textContent=active?`/ 再生中：${project.lines.indexOf(active)+1}行目`:"/ 再生中：なし";
   $("#seek").max=String(project.duration||1);$("#seek").value=String(current);
   $("#time").textContent=`${timeLabel(current)} / ${timeLabel(project.duration)}`;
+  $("#edit-seek").max=String(project.duration||1);$("#edit-seek").value=String(current);$("#edit-time").textContent=$("#time").textContent;
   $("#play").textContent=clock().paused?"▶ 再生":"Ⅱ 停止";
+  $("#edit-play").textContent=$("#play").textContent;
   $("#fixed-play").textContent=clock().paused?"▶":"Ⅱ";
   $("#fixed-play").setAttribute("aria-label",clock().paused?"素材を再生":"素材を一時停止");
   $("#fixed-play").title=clock().paused?"素材を再生":"素材を一時停止";
@@ -111,6 +170,7 @@ function draw(){
 function setStyleInputs(){
   const s=project.style;
   for(const [id,key] of [["style-mode","mode"],["font-size","fontSize"],["font-color","color"],["shadow","shadow"],["position","y"],["lyric-width","width"],["background-color","background"]]) $("#"+id).value=s[key];
+  $("#font-choice").value=normalizeFont(s.fontId);document.querySelectorAll("[data-font]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.font===s.fontId)));
 }
 function blobDownload(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const link=document.createElement("a");link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 async function runJob(kind){
@@ -151,7 +211,18 @@ for(const kind of ["media","audio","background"]) $("#"+kind+"-file").onchange=s
 $("#apply-lyrics").onclick=safely(applyLyrics);
 $("#align").onclick=safely(()=>runJob("align"));$("#export").onclick=safely(()=>runJob("export"));
 $("#cancel").onclick=safely(async()=>{if(jobId) await api(`/api/jobs/${jobId}/cancel`,{method:"POST"});});
-$("#play").onclick=$("#fixed-play").onclick=safely(playback);
+$("#play").onclick=$("#fixed-play").onclick=$("#edit-play").onclick=safely(playback);
+$("#edit-listen").onclick=safely(()=>listenRow());$("#edit-seek").oninput=e=>seekTo(Number(e.target.value));
+$("#open-preview").onclick=$("#edit-open-preview").onclick=openPreview;
+$("#return-preview").onclick=$("#edit-return-preview").onclick=returnPreview;
+for(const tab of ["production","editing"])$("#tab-"+tab).onclick=()=>switchTab(tab);
+$(".app-tabs").onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){e.preventDefault();switchTab(e.key==="Home"?"production":e.key==="End"?"editing":activeTab==="production"?"editing":"production",true);}};
+document.querySelectorAll("[data-tab-target]").forEach(a=>a.onclick=()=>switchTab(a.dataset.tabTarget));
+for(const filter of ["all","review"])$("#filter-"+filter).onclick=()=>{rowFilter=filter;render();};
+$("#font-choice").onchange=safely(e=>chooseFont(e.target.value));
+$("#font-samples").innerHTML=FONTS.map(f=>`<button data-font="${f.id}" style='font-family:"${f.family}"' aria-pressed="false" disabled><small>${escape(f.label)}</small><span>歌詞を、音に。<br>Hello, music.</span></button>`).join("");
+$("#font-samples").onclick=safely(e=>{const button=e.target.closest("[data-font]");if(button)return chooseFont(button.dataset.font);});
+FONTS.forEach(async f=>{try{await ensureFont(f.id);loadedFonts.add(f.id);const b=document.querySelector(`[data-font="${f.id}"]`);b.disabled=false;setStyleInputs();draw();}catch(error){message(error.message,true);}});
 $("#back").onclick=()=>seekTo(clock().currentTime-3);$("#forward").onclick=()=>seekTo(clock().currentTime+3);$("#seek").oninput=e=>seekTo(Number(e.target.value));
 $("#record-start").onclick=safely(()=>record("start"));$("#record-end").onclick=safely(()=>record("end"));
 function restoreHistory(next){
@@ -159,31 +230,40 @@ function restoreHistory(next){
   project=next;$("#lyrics").value=project.lyrics;
   if(mediaChanged){unload();attachMedia();}
   persist();render();setStyleInputs();
+  prepareProjectFont().catch(error=>message(error.message,true));
 }
 function undo(){restoreHistory(history.undo(project));}
 function redo(){restoreHistory(history.redo(project));}
 $("#undo").onclick=$("#fixed-undo").onclick=undo;$("#redo").onclick=$("#fixed-redo").onclick=redo;
 $("#next-review").onclick=()=>{const index=project.lines.findIndex(l=>l.id===selected);const ordered=[...project.lines.slice(index+1),...project.lines.slice(0,index+1)];const line=ordered.find(l=>l.review);if(line){selectRow(line.id);document.querySelector(`[data-id="${CSS.escape(line.id)}"]`)?.scrollIntoView({block:"center",behavior:"auto"});}else message("要確認の行はありません。");};
-$("#rows").onclick=safely(e=>{
+$("#rows").onclick=safely(async e=>{
   const button=e.target.closest("button[data-action]");if(!button)return;
   const id=button.closest("[data-id]").dataset.id,row=project.lines.find(l=>l.id===id);
   if(button.dataset.action==="select"){selectRow(id);return;}
-  selected=id;
+  if(button.dataset.action==="listen"){await listenRow(id);return;}
+  selected=id;selectionLabels();
   if(button.dataset.action==="confirm") commit(confirmLine(project,id));
+  if(button.dataset.action==="shift")commit(shiftTiming(project,id,Number(button.dataset.delta)));
   if(button.dataset.action==="adjust") {const field=button.dataset.field;if(!validTime(row[field])) throw new Error("先に時刻を指定してください。");commit(editTiming(project,id,field,row[field]+Number(button.dataset.delta)));}
 });
 $("#rows").onchange=safely(e=>{
   const field=e.target.dataset.field,id=e.target.closest("[data-id]")?.dataset.id;if(!field||!id)return;
+  selected=id;selectionLabels();
   if(field==="alignmentText"){const next=structuredClone(project);next.lines.find(l=>l.id===id).alignmentText=e.target.value;commit(next);}
   else commit(editTiming(project,id,field,e.target.value));
+});
+// On touch layouts, give the keyboard and timing fields the space they need.
+for(const event of ["focusin","focusout"])document.addEventListener(event,e=>{
+  if(event==="focusin"&&e.target.closest("#rows input")){selected=e.target.closest("[data-id]").dataset.id;selectionLabels();}
+  queueMicrotask(()=>document.body.classList.toggle("row-input-focus",Boolean(document.activeElement?.closest("#rows input"))));
 });
 for(const [id,key] of [["style-mode","mode"],["font-size","fontSize"],["font-color","color"],["shadow","shadow"],["position","y"],["lyric-width","width"],["background-color","background"]]) {
   $("#"+id).oninput=e=>{const next=structuredClone(project);next.style[key]=["mode","color","background"].includes(key)?e.target.value:Number(e.target.value);project=next;persist();draw();};
 }
 $("#save-project").onclick=safely(()=>{if($("#lyrics").value.trim())applyLyrics();blobDownload(JSON.stringify(saveProject(project),null,2),"lyrics.lyricvideo.json","application/json");});
-$("#project-file").onchange=safely(async e=>{const file=e.target.files[0];if(!file)return;const next=loadProject(JSON.parse(await file.text()));unload();history.past=[];history.future=[];project=next;selected=next.lines[0]?.id;$("#lyrics").value=next.lyrics;attachMedia();setStyleInputs();persist();render();message("プロジェクトを開きました。素材を選び直してください。");e.target.value="";});
+$("#project-file").onchange=safely(async e=>{const file=e.target.files[0];if(!file)return;const next=loadProject(JSON.parse(await file.text()));await ensureFont(next.style.fontId);loadedFonts.add(next.style.fontId);++fontRequest;unload();history.past=[];history.future=[];project=next;selected=next.lines[0]?.id;$("#lyrics").value=next.lyrics;attachMedia();setStyleInputs();persist();render();message("プロジェクトを開きました。素材を選び直してください。");e.target.value="";});
 $("#srt").onclick=safely(()=>{const content=exportSrt(project,$("#srt-language").value);if(!content)throw new Error("確認済みの時刻を確認してください。");blobDownload(content,"lyrics.srt","application/x-subrip;charset=utf-8");});
-document.addEventListener("keydown",safely(e=>{if(e.target.closest("input,textarea,select,[contenteditable]"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
+document.addEventListener("keydown",safely(e=>{if(e.target.closest("input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
 video.addEventListener("seeking",()=>{if(project.assets.audio?.url&&Number.isFinite(audio.duration))audio.currentTime=Math.min(video.currentTime,audio.duration);});
 video.addEventListener("pause",()=>{if(project.assets.audio?.url)audio.pause();});
 video.addEventListener("timeupdate",()=>{if(project.assets.audio?.url&&!video.paused&&Number.isFinite(audio.duration)&&Math.abs(audio.currentTime-video.currentTime)>.1&&video.currentTime<audio.duration)audio.currentTime=video.currentTime;});
@@ -191,8 +271,15 @@ video.addEventListener("error",()=>{if(video.getAttribute("src"))message("この
 audio.addEventListener("error",()=>{if(audio.getAttribute("src"))message("音源を再生できません。WAVなど別形式を確認してください。",true);});
 try{const saved=JSON.parse(localStorage.getItem(STORAGE));if(saved)project=loadProject(saved);}catch{}
 $("#lyrics").value=project.lyrics;attachMedia();setStyleInputs();
-await document.fonts.load('700 62px "Studio Noto"');render();
+// Available before the initial font wait, including a popup opened immediately.
+window.studioPreview={getState:previewState,paint:(target,overlay,state=previewState())=>drawComposite(target,overlay,state.project,state.time,visualSource()),
+  toggle:async()=>{try{await playback();}catch(error){message(error.message,true);throw error;}},seek:seekTo,return:returnPreview,closed:previewClosed};
+window.addEventListener("pagehide",returnPreview);
+await prepareProjectFont();render();
 function tick(){if(!clock().paused)draw();requestAnimationFrame(tick);}requestAnimationFrame(tick);
 api("/api/health").then(()=>$("#engine-state").textContent="接続済み：このPCで同期・MP4書き出しを実行します。").catch(()=>{$("#engine-state").textContent="処理用PCが未接続です。READMEの起動手順を確認してください。";$("#align").disabled=true;$("#export").disabled=true;});
 // Read-only browser test/inspection interface; no generated timestamps or mock results.
-window.studio={snapshot:()=>structuredClone(project),currentTime:()=>clock().currentTime,selectRow,seekTo};
+window.studio={snapshot:()=>structuredClone(project),currentTime:()=>clock().currentTime,selectRow,seekTo,
+  inspection:()=>({activeTab,rowFilter,selected,past:history.past.length,future:history.future.length,paused:clock().paused,detached:Boolean(previewWindow&&!previewWindow.closed)})};
+[video,audio].forEach(el=>["timeupdate","seeked","play","pause","loadeddata"].forEach(event=>el.addEventListener(event,draw)));
+$("#background").addEventListener("load",draw);

@@ -5,7 +5,10 @@
   "scripts": {
     "test": "node --test srt-core.test.js video/core.test.js",
     "test:browser": "node engine/browser-test.mjs",
-    "test:frames": "node engine/frame-test.mjs"
+    "test:frames": "node engine/frame-test.mjs",
+    "test:editing": "node engine/editing-test.mjs",
+    "test:fonts": "node engine/font-test.mjs",
+    "test:font-output": "node engine/font-output-test.mjs"
   },
   "dependencies": { "playwright": "1.63.0" }
 }
