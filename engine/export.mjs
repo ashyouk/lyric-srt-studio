@@ -2,12 +2,12 @@ import {readFile} from "node:fs/promises";
 import {spawn} from "node:child_process";
 import {once} from "node:events";
 import {launchBrowser} from "./browser.mjs";
-import {loadProject,cues} from "../video/core.js";
+import {captureFrame} from "./frame.mjs";
+import {loadProject,videoExportProject} from "../video/core.js";
 
 const request=JSON.parse(await readFile(process.argv[2],"utf8"));
-const project=loadProject(request.project);
-project.lines=cues(project,true);
-if(!project.lines.length) throw new Error("確認済みの字幕がありません。");
+const project=videoExportProject(loadProject(request.project),request.includeUnreviewed===true);
+if(!project.lines.length) throw new Error(request.includeUnreviewed===true?"有効な時刻候補がありません。":"確認済みの字幕がありません。");
 const FPS=30, duration=Number(request.duration), totalFrames=Math.ceil(duration*FPS);
 if(!(duration>0&&duration<=300)) throw new Error("動画は5分以内にしてください。");
 const event=(stage,fields={})=>process.stdout.write(JSON.stringify({stage,...fields})+"\n");
@@ -46,8 +46,7 @@ try {
   completed.catch(()=>{});
   encoder.stdin.on("error",()=>{});
   for(let frame=0;frame<totalFrames;frame++) {
-    await page.evaluate(({p,t})=>window.drawFrame(p,t),{p:project,t:frame/FPS});
-    const image=await page.locator("canvas").screenshot({type:"png",omitBackground:true});
+    const image=await captureFrame(page,project,frame/FPS);
     if(encoder.exitCode!==null) throw new Error(failure||"Encoder stopped");
     if(!encoder.stdin.write(image)) await Promise.race([once(encoder.stdin,"drain"),completed]);
     if(frame%30===0) event("render",{message:"歌詞を描き込み、MP4をエンコード中",frame:frame+1,totalFrames});

@@ -12,6 +12,13 @@ import unicodedata
 MODEL = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 
 
+def select_asr_model(request):
+    value = request.get("asrModel") or os.environ.get("LYRIC_ASR_MODEL", "small")
+    if not isinstance(value, str) or value not in {"small", "large-v3-turbo"}:
+        raise ValueError("音声認識モデルはsmallまたはlarge-v3-turboを選択してください。")
+    return value
+
+
 def normalized(text):
     return "".join(c for c in unicodedata.normalize("NFKC", str(text)).lower()
                    if c.isalnum())
@@ -105,6 +112,7 @@ def run(request_path, result_path):
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     started = time.monotonic()
     request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+    asr_model = select_asr_model(request)
     lines = request["lines"]
     if not lines or len(lines) > 1000:
         raise ValueError("歌詞は1〜1000行で指定してください。")
@@ -120,10 +128,11 @@ def run(request_path, result_path):
     duration = len(audio) / sr
     if duration > 300:
         raise ValueError("この試作の自動同期は5分以内です。長い曲は手動編集をご利用ください。")
-    event("recognize", message="音声認識で歌われた内容を確認中（表示歌詞には使いません）")
+    event("load-recognizer", message=f"音声認識モデルを読込中：{asr_model}（初回はダウンロード）")
     from faster_whisper import WhisperModel
-    asr = WhisperModel(os.environ.get("LYRIC_ASR_MODEL", "small"), device="cpu", compute_type="int8",
+    asr = WhisperModel(asr_model, device="cpu", compute_type="int8",
                        cpu_threads=max(1, min(4, os.cpu_count() or 1)))
+    event("recognize", message="音声認識で歌われた内容を確認中（表示歌詞には使いません）")
     segments, _ = asr.transcribe(audio, beam_size=5, word_timestamps=True, vad_filter=False,
                                 condition_on_previous_text=False)
     segments = list(segments)
@@ -135,10 +144,11 @@ def run(request_path, result_path):
     gc.collect()
     if request.get("method", "qwen") == "asr":
         # Monotonic text matching uses real acoustic word times, not duration/character division.
-        result = {"engine": "faster-whisper-small-word-alignment", "duration": duration,
+        result = {"engine": f"faster-whisper-{asr_model}-word-alignment", "duration": duration,
                   "elapsedSeconds": round(time.monotonic() - started, 2),
                   "lines": aggregate(lines, asr_words, recognized, duration),
-                  "diagnostics": {"recognizedForMatchingOnly": recognized, "wordTimings": asr_words}}
+                  "diagnostics": {"recognizedForMatchingOnly": recognized, "wordTimings": asr_words,
+                                  "asrModel": asr_model}}
         Path(result_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         event("complete", message="音声認識の音響時刻から歌詞行の候補を作成しました。再生して確認してください。")
         return
@@ -195,7 +205,7 @@ def run(request_path, result_path):
               "lines": aligned_lines,
               "diagnostics": {"recognizedForMatchingOnly": recognized, "wordTimings": words,
                               "language": language, "asrAnchors": anchors,
-                              "asrModel": os.environ.get("LYRIC_ASR_MODEL", "small")}}
+                              "asrModel": asr_model}}
     Path(result_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     event("complete", message="同期候補を作成しました。要確認の行を再生してください。")
 

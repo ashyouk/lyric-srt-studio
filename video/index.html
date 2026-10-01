@@ -14,14 +14,14 @@
 <label for="lyrics">実際に歌われている、正しい歌詞</label><textarea id="lyrics" rows="9" placeholder="1行ずつ貼り付けてください。&#10;空行・[Verse]・[Chorus]は字幕にしません。"></textarea>
 <div class="buttons"><button id="apply-lyrics" type="button">歌詞を反映</button><button id="align" class="primary" type="button">歌詞を自動で合わせる</button></div>
 <p class="hint">本文は入力どおりに保持します。読みや表記の照合が難しい行は、修正欄の「照合用テキスト」で調整できます。自動結果は聴いて確認するまで「要確認」です。</p>
-<details><summary>同期処理の選択</summary><label>方式<select id="method"><option value="qwen">強制照合：Qwen3＋音声認識チェック</option><option value="asr">軽量照合：Whisperの音響時刻</option></select></label><p class="hint">初回はPCへモデルをダウンロードします。処理時間は曲・PC性能・歌唱によって変わります。ページを閉じてもPC側の処理は続きます。</p></details>
+<details><summary>同期処理の選択</summary><label>音声認識モデル<select id="asr-model"><option value="large-v3-turbo">歌声の認識を重視：large-v3-turbo</option><option value="small">少ないメモリを優先：small</option></select></label><label>方式<select id="method"><option value="qwen">強制照合：Qwen3＋音声認識チェック</option><option value="asr">音声認識のみ：Whisperの音響時刻</option></select></label><p class="hint">初回はPCへモデルをダウンロードします。大きいモデルでも精度は保証されません。処理時間は曲・PC性能・歌唱によって変わります。ページを閉じてもPC側の処理は続きます。</p></details>
 </section>
 <div class="preview-column">
 <section id="preview" class="panel"><div class="panel-title"><h2>02 プレビュー</h2><span>16:9 / 1920×1080</span></div>
 <div id="stage" class="stage"><video id="video" playsinline preload="metadata"></video><img id="background" alt="背景画像" hidden><canvas id="canvas" width="1920" height="1080" aria-label="歌詞プレビュー"></canvas></div><audio id="audio" preload="metadata"></audio>
 <input id="seek" class="seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="再生位置">
 <div class="transport"><button id="play" type="button">▶ 再生</button><button id="back" type="button">−3秒</button><button id="forward" type="button">＋3秒</button><output id="time">00:00.000 / 00:00.000</output></div>
-<p id="preview-note" class="hint">自動推定の字幕も表示します。MP4・SRTには「確認済み」の行だけを書き出します。</p>
+<p id="preview-note" class="hint">自動推定の字幕も表示します。「試写MP4」は要確認の候補を含められます。確認済みMP4とSRTは確認済みの行だけを使用します。</p>
 </section>
 <section class="panel"><div class="panel-title"><h2>歌詞の見た目</h2><span>再同期は不要です</span></div>
 <div class="style-grid"><label>表示スタイル<select id="style-mode"><option value="subtitle">通常字幕</option><option value="scroll">スクロール歌詞</option></select></label><label>文字サイズ<input id="font-size" type="range" min="24" max="120" value="62"></label><label>文字色<input id="font-color" type="color" value="#ffffff"></label><label>縁取り・影<input id="shadow" type="range" min="0" max="12" value="6"></label><label>表示位置<input id="position" type="range" min="0.15" max="0.85" step="0.01" value="0.78"></label><label>歌詞領域の幅<input id="lyric-width" type="range" min="0.3" max="0.95" step="0.01" value="0.82"></label><label>背景色<input id="background-color" type="color" value="#101622"></label></div>
@@ -29,7 +29,9 @@
 </div></div>
 <section class="panel job-panel" id="job-panel" hidden><strong id="job-status" role="status"></strong><progress id="job-progress" hidden></progress><button id="cancel" type="button">処理をキャンセル</button><a id="download-video" hidden>MP4を保存</a></section>
 <section id="editing" class="panel"><div class="panel-title"><h2>03 聴いて、必要な行だけ修正</h2><span id="review-count">0行</span></div><div class="buttons"><button id="next-review">次の要確認行</button><button id="undo" disabled>↶ 戻る</button><button id="redo" disabled>↷ やり直す</button></div><div id="rows" class="rows"><p class="hint">素材と歌詞を選ぶと、ここで時刻を確認・修正できます。</p></div></section>
-<section id="output" class="panel"><div class="panel-title"><h2>04 保存</h2><span>確認済みのタイミングを使用</span></div>
+<section id="output" class="panel"><div class="panel-title"><h2>04 保存</h2><span>試写と確認済み出力を区別</span></div>
+<label>MP4の書き出し範囲<select id="export-mode"><option value="audition">試写：要確認の時刻候補も含める</option><option value="confirmed">確認済みの歌詞行だけ</option></select></label>
+<p class="hint">試写は自動候補の確認用です。書き出しても行は確認済みになりません。時刻のない行は含められません。SRTは確認済みの行だけを書き出します。</p>
 <div class="buttons"><button id="export" class="primary">歌詞入りMP4を作る</button><button id="srt">SRTを保存</button><select id="srt-language" aria-label="SRTの言語"><option value="original">入力した歌詞</option><option value="jp">日本語（旧プロジェクト）</option><option value="en">English（旧プロジェクト）</option><option value="bilingual">日英併記（旧プロジェクト）</option></select><button id="save-project">プロジェクトを保存</button><label class="file-button">プロジェクトを開く<input id="project-file" type="file" accept="application/json,.json"></label></div>
 <p class="hint">MP4：H.264＋AAC・横長1080p・30fps。縦動画や4:3素材は、切り取りや引き伸ばしをせず余白を付けます。素材本体はプロジェクトに含まれません。再読み込み後は選び直してください。</p>
 </section>

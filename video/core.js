@@ -90,7 +90,8 @@ export function applyAlignment(project, result) {
       review: protectedTiming ? line.review : true,
       reasons: protectedTiming ? line.reasons : estimate.reasons};
   });
-  next.alignment = {engine: result.engine, elapsedSeconds: result.elapsedSeconds};
+  next.alignment = {engine: result.engine, elapsedSeconds: result.elapsedSeconds,
+    asrModel: result.diagnostics?.asrModel || null};
   return next;
 }
 
@@ -120,6 +121,14 @@ export function confirmLine(project, id) {
 export function cues(project, confirmedOnly = false) {
   return project.lines.filter(l => validTime(l.start) && validTime(l.end) && l.end > l.start &&
     l.start >= 0 && l.end <= project.duration + .15 && (!confirmedOnly || !l.review));
+}
+
+// An audition includes valid candidates without silently approving the saved rows.
+// Final output keeps the same confirmed-only intervals as SRT.
+export function videoExportProject(project, includeUnreviewed = false) {
+  const next = clone(project);
+  next.lines = cues(next, !includeUnreviewed);
+  return next;
 }
 
 export function activeCue(project, time) {

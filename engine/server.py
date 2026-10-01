@@ -158,6 +158,8 @@ def run_job(identifier, kind, body):
                     raise ValueError("歌詞は1〜1000行、3万文字以内で指定してください。")
                 payload = {"audio": str(audio_source["path"]), "lines": lines,
                            "method": "asr" if body.get("method") == "asr" else "qwen"}
+                if body.get("asrModel"):
+                    payload["asrModel"] = body["asrModel"]
                 command = [sys.executable, str(ROOT / "engine" / "align.py"), str(request_path), str(result_path)]
             else:
                 project = body["project"]
@@ -166,7 +168,8 @@ def run_job(identifier, kind, body):
                            "audio": str(audio_source["path"]), "duration": duration,
                            "audioSeparate": audio_source["id"] != source["id"],
                            "background": str(asset(body["backgroundId"])["path"]) if body.get("backgroundId") else None,
-                           "baseUrl": f"http://127.0.0.1:{PORT}", "output": str(result_path)}
+                           "baseUrl": f"http://127.0.0.1:{PORT}", "output": str(result_path),
+                           "includeUnreviewed": body.get("includeUnreviewed") is True}
                 command = ["node", str(ROOT / "engine" / "export.mjs"), str(request_path)]
             request_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             if job.get("cancelRequested"):
@@ -196,15 +199,20 @@ def run_job(identifier, kind, body):
                 return
             if returncode:
                 raise ValueError("処理に失敗しました。モデル取得・空きメモリ・FFmpegを確認し、再試行してください。詳細はローカルworker.logに保存しました。")
-            job.update(status="complete", stage="complete", message="処理が完了しました。",
-                       elapsedSeconds=round(time.monotonic() - job["started"], 2))
             if kind == "align":
-                job["result"] = json.loads(result_path.read_text(encoding="utf-8"))
+                result = json.loads(result_path.read_text(encoding="utf-8"))
             else:
                 metadata = probe(result_path)
                 if not metadata["hasAudio"] or not metadata["hasVideo"]:
                     raise ValueError("出力に映像または音声がありません。")
-                job["result"] = {"url": f"/api/jobs/{identifier}/download", **metadata}
+                result = {"url": f"/api/jobs/{identifier}/download",
+                          "reviewMode": "audition" if payload["includeUnreviewed"] else "confirmed", **metadata}
+            if job.get("cancelRequested"):
+                return
+            # Pollers must never observe complete without its result. FFprobe can
+            # take long enough for the UI to poll between process exit and readiness.
+            job.update(result=result, status="complete", stage="complete", message="処理が完了しました。",
+                       elapsedSeconds=round(time.monotonic() - job["started"], 2))
         except Exception as error:
             if job["status"] != "cancelled":
                 job.update(status="failed", message=str(error), stage="failed")
@@ -225,6 +233,8 @@ async def start_job(kind: str, request: Request):
         raise HTTPException(400, "処理内容を読み込めません。") from error
     if not isinstance(body, dict):
         raise HTTPException(400, "処理内容はプロジェクトとして指定してください。")
+    if kind == "align" and body.get("asrModel") not in (None, "small", "large-v3-turbo"):
+        raise HTTPException(400, "音声認識モデルはsmallまたはlarge-v3-turboを選択してください。")
     if any(j["status"] in {"queued", "running"} for j in jobs.values()):
         raise HTTPException(409, "実行中の処理が終わるか、キャンセルしてから再実行してください。")
     identifier = uuid.uuid4().hex
@@ -256,7 +266,8 @@ def download(identifier: str):
     job = jobs.get(identifier)
     if not job or job["kind"] != "export" or job["status"] != "complete":
         raise HTTPException(404, "完成した動画がありません。")
-    return FileResponse(JOBS / identifier / "lyrics.mp4", media_type="video/mp4", filename="lyrics.mp4")
+    filename = "lyrics-audition.mp4" if job["result"].get("reviewMode") == "audition" else "lyrics.mp4"
+    return FileResponse(JOBS / identifier / "lyrics.mp4", media_type="video/mp4", filename=filename)
 
 
 app.mount("/video", StaticFiles(directory=ROOT / "video", html=True), name="video")

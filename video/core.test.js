@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {parseLyrics, newProject, loadProject, saveProject, applyAlignment, editTiming, confirmLine,
-  History, cues, activeCue, exportSrt, layoutScene, wrapText} from "./core.js";
+  History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject} from "./core.js";
 
 const fixture = () => {
   const p = newProject("星よ、Hello world\n同じ歌詞\n同じ歌詞"); p.duration = 20;
@@ -34,6 +34,27 @@ test("alignment applies acoustic estimates without replacing display or reading 
   assert.equal(next.lines[0].alignmentText, "ほしよ hello world");
   assert.equal(next.lines[0].start, 3); assert.equal(next.lines[0].review, true);
   assert.equal(p.lines[0].start, 2);
+});
+test("recognizer choice survives save/load without accepting changed canonical text", () => {
+  const p = fixture();
+  const next = applyAlignment(p, {engine: "Qwen", elapsedSeconds: 90,
+    diagnostics: {asrModel: "large-v3-turbo"}, lines: p.lines.map(l => ({id:l.id,start:l.start,end:l.end,reasons:[]}))});
+  const restored = loadProject(saveProject(next));
+  assert.equal(restored.alignment.asrModel, "large-v3-turbo");
+  assert.equal(restored.alignment.elapsedSeconds, 90);
+  assert.deepEqual(restored.lines.map(l => l.text), p.lines.map(l => l.text));
+});
+test("audition includes valid unreviewed cues without approving or mutating the project", () => {
+  const p=fixture();p.lines[1].end=null;
+  const original=structuredClone(p);
+  const audition=videoExportProject(p,true);
+  assert.equal(audition.lines.length,2);
+  assert.ok(audition.lines.every(l=>l.review));
+  assert.equal(videoExportProject(p).lines.length,0);
+  assert.deepEqual(p,original);
+  const confirmed=confirmLine(p,'line-0');
+  assert.deepEqual(videoExportProject(confirmed).lines.map(l=>l.id),['line-0']);
+  assert.equal(exportSrt(confirmed).split('\n').filter(l=>l.includes('-->')).length,1);
 });
 test("reanalysis protects an entire manually corrected row", () => {
   let p = editTiming(fixture(), "line-0", "start", 2.5);

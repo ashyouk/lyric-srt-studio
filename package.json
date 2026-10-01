@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test srt-core.test.js video/core.test.js",
-    "test:browser": "node engine/browser-test.mjs"
+    "test:browser": "node engine/browser-test.mjs",
+    "test:frames": "node engine/frame-test.mjs"
   },
   "dependencies": { "playwright": "1.63.0" }
 }

@@ -117,11 +117,13 @@ async function runJob(kind){
   if(busy) throw new Error("実行中の処理を完了またはキャンセルしてください。");
   applyLyrics();
   if(!project.assets.media?.id) throw new Error("素材を選択し直してください。");
-  if(kind==="export"&&!cues(project,true).length) throw new Error("少なくとも1行を聴いて「確認済み」にしてください。");
-  if(kind==="export"&&project.lines.some(l=>l.review)) message("要確認の行はMP4へ描き込みません。確認済みの行だけを書き出します。");
+  const audition=kind==="export"&&$("#export-mode").value==="audition";
+  if(kind==="export"&&!cues(project,!audition).length) throw new Error(audition?"先に自動同期または手動で時刻候補を指定してください。":"少なくとも1行を聴いて「確認済み」にしてください。");
+  if(kind==="export") message(audition?"要確認の時刻候補を含む試写MP4です。行の確認状態は変更しません。":"要確認の行はMP4へ描き込みません。確認済みの行だけを書き出します。");
   const startedSignature=signature(),startedMedia=project.assets.media.id;
   const body={mediaId:startedMedia,audioId:project.assets.audio?.id,backgroundId:project.assets.background?.id,
-    lines:project.lines.map(({id,text,alignmentText})=>({id,text,alignmentText})),project,method:$("#method").value};
+    lines:project.lines.map(({id,text,alignmentText})=>({id,text,alignmentText})),project,method:$("#method").value,
+    asrModel:$("#asr-model").value,includeUnreviewed:audition};
   busy=true;$("#align").disabled=true;$("#export").disabled=true;$("#job-panel").hidden=false;$("#cancel").hidden=false;$("#download-video").hidden=true;
   try {
     const submitted=await api(`/api/jobs/${kind}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -135,7 +137,7 @@ async function runJob(kind){
         if(kind==="align"){
           if(signature()!==startedSignature||project.assets.media.id!==startedMedia) throw new Error("処理中に歌詞または素材が変更されました。結果は適用せず、再同期してください。");
           commit(applyAlignment(project,job.result));message(`同期候補を作りました（${job.result.elapsedSeconds}秒）。要確認行を再生してください。`);
-        } else {$("#download-video").href=job.result.url;$("#download-video").download="lyrics.mp4";$("#download-video").hidden=false;message(`音声付きMP4を作成しました（${job.elapsedSeconds}秒）。保存できます。`);}
+        } else {$("#download-video").href=job.result.url;$("#download-video").download=audition?"lyrics-audition.mp4":"lyrics.mp4";$("#download-video").textContent=audition?"試写MP4を保存":"確認済みMP4を保存";$("#download-video").hidden=false;message(`${audition?"要確認の候補を含む試写":"確認済み行の"}MP4を作成しました（${job.elapsedSeconds}秒）。${audition?"歌声と字幕を聴いて確認してください。":"保存できます。"}`);}
         break;
       }
       if(job.status==="failed") throw new Error(job.message);

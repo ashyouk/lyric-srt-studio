@@ -1,7 +1,15 @@
 import unittest
-from engine.align import aggregate, normalized, acoustic_boundaries
+from unittest.mock import patch
+from engine.align import aggregate, normalized, acoustic_boundaries, select_asr_model
 
 class AlignmentMappingTests(unittest.TestCase):
+    def test_model_choice_is_explicit_and_rejects_arbitrary_download_sources(self):
+        with patch.dict("os.environ", {"LYRIC_ASR_MODEL": "small"}):
+            self.assertEqual(select_asr_model({}), "small")
+            self.assertEqual(select_asr_model({"asrModel": "large-v3-turbo"}), "large-v3-turbo")
+        with self.assertRaises(ValueError):
+            select_asr_model({"asrModel": "https://example.invalid/model"})
+
     def test_japanese_english_display_not_rewritten(self):
         lines = [{"id":"a","text":"星よ Hello!","alignmentText":"ほしよ Hello"}]
         words = [{"text":"ほしよ","start_time":1.2,"end_time":2},

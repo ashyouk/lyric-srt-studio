@@ -4,7 +4,9 @@
 
 ## 採用方式
 
-PC内で **faster-whisper small（CPU int8）で実際の単語時刻を探し、その付近をQwen3-ForcedAligner-0.6B-hfで行ごとに強制照合** します。音声認識を表示歌詞には使いません。文字列の単調照合で入力行へ実音響時刻を対応させます。処理時間／全文の長さから均等な時刻を生成する処理はありません。
+PC内で **faster-whisper（CPU int8）で実際の単語時刻を探し、その付近をQwen3-ForcedAligner-0.6B-hfで行ごとに強制照合** します。音声認識を表示歌詞には使いません。文字列の単調照合で入力行へ実音響時刻を対応させます。処理時間／全文の長さから均等な時刻を生成する処理はありません。
+
+認識モデルは`large-v3-turbo`／`small`を選択できます。UIの初期選択は`large-v3-turbo`。`small`の歌唱認識漏れを大きいモデルとの比較で調べられるようにしました。全楽曲での精度改善を保証しません。モデルを切り替えても本文は変えず、手動修正した行は保護します。APIでは2種類の名前のみを許可し、任意のURL／モデル配布先は受け付けません。CLI未指定時は従来の`small`です。使用した認識モデルも結果とプロジェクトの診断情報へ保存します。
 
 全文を一度に強制照合した実験では、歌唱で数秒ずれる行があったため不採用。ASRの実音響アンカーがない行は未配置にし、独立した認識内容との一致が不足する行も未確定です。行の周辺±0.65秒だけを強制照合し、境界差が大きい場合はASR時刻へ戻して理由を記録します。無音端は実波形の10ms RMSで調整します。このRMS処理は静かな音源向けの補助で、伴奏から歌声を分離するものではありません。
 
@@ -38,12 +40,14 @@ PC内で **faster-whisper small（CPU int8）で実際の単語時刻を探し�
 
 プロジェクト `lyric-video-studio-project` version 1に入力原文、自動候補、手動区間、確認状態、スタイル、素材参照を保存します。旧形式を変更せず、取り込み先に旧JSONの複製を持ちます。素材は埋め込みません。ブラウザの保存キーも手動版とは別です。
 
+MP4の出力範囲は、要確認の有効な候補も含む「試写」と「確認済み行だけ」を明示的に区別します。試写ファイル名は`lyrics-audition.mp4`、行の確認状態・時刻は出力操作で変えません。時刻不明の行は試写にも含めません。確認済みMP4とSRTは同じ確定区間から出力します。
+
 ## ライセンスと販売前の注意
 
 |使用物|条件（今回のインストール／公式配布）|
 |---|---|
 |Qwen3-ForcedAligner-0.6B-hf|Apache-2.0。モデルを再配布する場合もライセンス・通知を保持|
-|faster-whisper / Whisper small / CTranslate2|MIT。著作権・許諾文を保持|
+|faster-whisper / Whisper small・large-v3-turbo / CTranslate2|MIT。著作権・許諾文を保持。turboの[OpenAI原モデル](https://huggingface.co/openai/whisper-large-v3-turbo)と[CTranslate2変換版](https://huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo)の通知も確認|
 |Transformers / Accelerate / python-multipart|Apache-2.0|
 |PyTorch 2.14.1|複合ライセンス：Apache-2.0、LLVM例外、BSD-2/3、BSL-1.0、MIT。wheelに含まれる各通知を保持|
 |SoundFile / PyAV / Uvicorn|BSD-3-Clause。音声ライブラリ・FFmpegのバイナリ条件は別途確認|
