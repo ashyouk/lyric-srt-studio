@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {parseLyrics, newProject, loadProject, saveProject, applyAlignment, editTiming, confirmLine,
+import {parseLyrics, newProject, updateLyrics, loadProject, saveProject, applyAlignment, editTiming, confirmLine,
   History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject, shiftTiming, timingIssues} from "./core.js";
 import {FONTS,normalizeFont,fontFamily} from "./font-catalog.js";
 
@@ -27,6 +27,108 @@ test("canonical text, mixed language, repeated rows, blanks and section tags sur
   assert.notEqual(p.lines[1].id, p.lines[2].id);
   assert.deepEqual(parseLyrics("\n[Verse]\n\n"), []);
 });
+const correctedLyricsFixture = () => {
+  const p=newProject("赤い箱\n青い箱\n青い箱");p.duration=20;
+  p.lines.forEach((line,i)=>Object.assign(line,{start:1+i*4,end:3+i*4,
+    alignmentText:["あかいはこ","あおいはこ一回目","あおいはこ二回目"][i],
+    manual:{start:true,end:i!==1},review:i===1,reasons:[`確認理由${i}`],
+    auto:{start:.5+i*4,end:3.5+i*4,evidence:{matchedCharacters:i+1}}}));
+  p.alignment={engine:"synthetic",elapsedSeconds:0,asrModel:"small"};
+  return p;
+};
+
+test("blank-line changes preserve corrected rows through JSON save and reload",()=>{
+  const p=correctedLyricsFixture(), original=structuredClone(p);
+  for(const raw of ["\n赤い箱\n青い箱\n青い箱", "赤い箱\n\n青い箱\n \n青い箱\n\n",
+                   "\r\n赤い箱\r\n\r\n青い箱\r\n青い箱\r\n", p.lyrics]){
+    const next=updateLyrics(p,raw), restored=loadProject(JSON.parse(JSON.stringify(saveProject(next))));
+    assert.equal(restored.lyrics,raw);
+    const parsed=parseLyrics(raw);
+    assert.deepEqual(restored.lines,p.lines.map((line,i)=>({...line,sourceLine:parsed[i].sourceLine,section:parsed[i].section})));
+    assert.deepEqual(restored.alignment,p.alignment);
+    assert.deepEqual(p,original);
+  }
+});
+
+test("section-tag changes update source metadata without changing row identity",()=>{
+  const p=correctedLyricsFixture();
+  const tagged=updateLyrics(p,"[Verse]\n赤い箱\n[Chorus]\n青い箱\n\n[Outro]\n青い箱");
+  assert.deepEqual(tagged.lines.map(l=>l.section),["[Verse]","[Chorus]","[Outro]"]);
+  assert.deepEqual(tagged.lines.map(l=>l.sourceLine),[1,3,6]);
+  assert.deepEqual(tagged.lines.map(l=>l.id),p.lines.map(l=>l.id));
+  assert.deepEqual(updateLyrics(tagged,p.lyrics),p);
+  tagged.lines[0].manual.start=false;
+  assert.equal(p.lines[0].manual.start,true);
+});
+
+test("repeated subtitle rows retain distinct readings and times across repeated saves",()=>{
+  const p=correctedLyricsFixture();
+  let next=loadProject(saveProject(updateLyrics(p,"\n赤い箱\n\n青い箱\n青い箱")));
+  next=loadProject(saveProject(updateLyrics(next,"[Verse]\n赤い箱\n青い箱\n\n[Chorus]\n青い箱")));
+  assert.deepEqual(next.lines.map(({sourceLine,section,...row})=>row),p.lines.map(({sourceLine,section,...row})=>row));
+  assert.equal(new Set(next.lines.map(l=>l.id)).size,3);
+});
+
+test("ordinary lyric updates reject meaningful edits without altering saved corrections",()=>{
+  const p=correctedLyricsFixture(),original=structuredClone(p);
+  const saved=JSON.stringify(saveProject(p));
+  for(const raw of ["赤い袋\n青い箱\n青い箱", "赤い箱\n緑の箱\n青い箱\n青い箱",
+                   "赤い箱\n青い箱", "赤い箱\n青い箱\n青い箱\n青い箱", " 赤い箱\n青い箱\n青い箱"]){
+    assert.throws(()=>updateLyrics(p,raw),/変更はまだ反映していません/);
+    assert.deepEqual(p,original);
+    assert.equal(JSON.stringify(saveProject(p)),saved);
+    assert.deepEqual(loadProject(JSON.parse(saved)).lines,p.lines);
+  }
+});
+
+test("explicit timing reset applies edits without guessing matches for repeated rows",()=>{
+  const p=correctedLyricsFixture(),original=structuredClone(p);
+  for(const raw of ["赤い袋\n青い箱\n青い箱", "赤い箱\n緑の箱\n青い箱\n青い箱",
+                   "赤い箱\n青い箱", "赤い箱\n青い箱\n青い箱\n青い箱"]){
+    const next=updateLyrics(p,raw,{resetTiming:true});
+    assert.deepEqual(next.lines,parseLyrics(raw));
+    assert.equal(next.alignment,null);
+    assert.deepEqual(loadProject(saveProject(next)).lines,next.lines);
+    assert.deepEqual(p,original);
+  }
+});
+
+test("reordering repeated rows requires explicit reset even when a row stays in place",()=>{
+  const p=correctedLyricsFixture();
+  assert.throws(()=>updateLyrics(p,"青い箱\n赤い箱\n青い箱"),/変更はまだ反映していません/);
+  const next=updateLyrics(p,"青い箱\n赤い箱\n青い箱",{resetTiming:true});
+  assert.deepEqual(next.lines,parseLyrics(next.lyrics));
+  assert.ok(next.lines.every(l=>l.start===null&&l.end===null&&l.review));
+});
+
+test("lyrics updates remain single Undo steps and redo retains saved corrections",()=>{
+  const p=correctedLyricsFixture(),h=new History();
+  const formatted=h.change(p,updateLyrics(p,"\n[Verse]\n"+p.lyrics));
+  assert.deepEqual(h.undo(formatted),p);
+  assert.deepEqual(h.redo(p),formatted);
+  assert.throws(()=>updateLyrics(formatted,"赤い袋\n青い箱\n青い箱"),/変更はまだ反映していません/);
+  assert.equal(h.past.length,1);
+  const edited=h.change(formatted,updateLyrics(formatted,"赤い袋\n青い箱\n青い箱",{resetTiming:true}));
+  assert.deepEqual(h.undo(edited),formatted);
+  const redone=h.redo(formatted);
+  assert.deepEqual(redone,edited);
+  assert.ok(redone.lines.every(l=>l.start===null));
+});
+
+test("empty or tag-only lyric updates are rejected without changing the project",()=>{
+  const p=correctedLyricsFixture(),original=structuredClone(p);
+  for(const raw of ["", " \n\n", "[Verse]\n\n[Chorus]"])assert.throws(()=>updateLyrics(p,raw),/1行以上/);
+  assert.deepEqual(p,original);
+});
+
+test("first lyric entry needs no reset permission and formatting never resets corrections",()=>{
+  const initial=updateLyrics(newProject(),"赤い箱\n青い箱");
+  assert.deepEqual(initial.lines,parseLyrics(initial.lyrics));
+  const p=correctedLyricsFixture();
+  const next=updateLyrics(p,"\n"+p.lyrics,{resetTiming:true});
+  assert.deepEqual(next.lines.map(({sourceLine,...line})=>line),p.lines.map(({sourceLine,...line})=>line));
+});
+
 test("alignment applies acoustic estimates without replacing display or reading text", () => {
   const p = fixture(), text = p.lines.map(l => l.text);
   p.lines[0].alignmentText = "ほしよ hello world";

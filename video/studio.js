@@ -1,4 +1,4 @@
-import {newProject,loadProject,saveProject,parseLyrics,applyAlignment,editTiming,confirmLine,
+import {newProject,loadProject,saveProject,updateLyrics,applyAlignment,editTiming,confirmLine,
   cues,exportSrt,drawLyrics,History,validTime,activeCue,shiftTiming,timingIssues} from "./core.js";
 import {FONTS,normalizeFont} from "./font-catalog.js";
 import {ensureFont} from "./fonts.js";
@@ -93,15 +93,13 @@ async function upload(file,kind){
   commit(next);attachMedia();
   message(kind==="media"&&!asset.hasAudio?"動画に音声がありません。追加の音源を選択してください。":"素材を読み込みました。");
 }
-function applyLyrics(){
+function applyLyrics({confirmReset=false}={}){
   const raw=$("#lyrics").value;
   if(raw===project.lyrics&&project.lines.length) return;
-  const parsed=parseLyrics(raw);
-  if(!parsed.length) throw new Error("歌詞を1行以上貼り付けてください。");
-  const previous=new Map(project.lines.map(l=>[l.id,l]));
-  const next=structuredClone(project);next.lyrics=raw;
-  next.lines=parsed.map(l=>previous.get(l.id)?.text===l.text?previous.get(l.id):l);
-  selected=next.lines[0]?.id;commit(next);message(`${next.lines.length}行を反映しました。`);
+  const next=updateLyrics(project,raw,{resetTiming:confirmReset});
+  const reset=project.lines.length>0&&(next.lines.length!==project.lines.length||next.lines.some((l,i)=>l.text!==project.lines[i].text));
+  if(reset&&!window.confirm("本文・順序・行数が変わっています。変更を反映すると、全行の時刻・確認状態・照合用テキストをリセットし、再同期が必要になります。歌詞を反映して再同期の準備をしますか？\nキャンセルすると既存の時刻と自動保存を保持します。"))return;
+  selected=next.lines[0]?.id;commit(next);message(reset?`${next.lines.length}行を反映しました。本文または順序が変わったため、時刻は未同期に戻しました。「戻る」で復元できます。`:`${next.lines.length}行を反映しました。`);
 }
 function selectRow(id,seek=true){selected=id;render();const line=project.lines.find(l=>l.id===id);if(seek&&validTime(line?.start)) seekTo(Math.max(0,line.start-.5));}
 function seekTo(time){
@@ -208,7 +206,7 @@ async function runJob(kind){
 }
 
 for(const kind of ["media","audio","background"]) $("#"+kind+"-file").onchange=safely(async e=>{await upload(e.target.files[0],kind);e.target.value="";});
-$("#apply-lyrics").onclick=safely(applyLyrics);
+$("#apply-lyrics").onclick=safely(()=>applyLyrics({confirmReset:true}));
 $("#align").onclick=safely(()=>runJob("align"));$("#export").onclick=safely(()=>runJob("export"));
 $("#cancel").onclick=safely(async()=>{if(jobId) await api(`/api/jobs/${jobId}/cancel`,{method:"POST"});});
 $("#play").onclick=$("#fixed-play").onclick=$("#edit-play").onclick=safely(playback);
@@ -260,7 +258,7 @@ for(const event of ["focusin","focusout"])document.addEventListener(event,e=>{
 for(const [id,key] of [["style-mode","mode"],["font-size","fontSize"],["font-color","color"],["shadow","shadow"],["position","y"],["lyric-width","width"],["background-color","background"]]) {
   $("#"+id).oninput=e=>{const next=structuredClone(project);next.style[key]=["mode","color","background"].includes(key)?e.target.value:Number(e.target.value);project=next;persist();draw();};
 }
-$("#save-project").onclick=safely(()=>{if($("#lyrics").value.trim())applyLyrics();blobDownload(JSON.stringify(saveProject(project),null,2),"lyrics.lyricvideo.json","application/json");});
+$("#save-project").onclick=safely(()=>{if(project.lines.length||$("#lyrics").value.trim())applyLyrics();blobDownload(JSON.stringify(saveProject(project),null,2),"lyrics.lyricvideo.json","application/json");});
 $("#project-file").onchange=safely(async e=>{const file=e.target.files[0];if(!file)return;const next=loadProject(JSON.parse(await file.text()));await ensureFont(next.style.fontId);loadedFonts.add(next.style.fontId);++fontRequest;unload();history.past=[];history.future=[];project=next;selected=next.lines[0]?.id;$("#lyrics").value=next.lyrics;attachMedia();setStyleInputs();persist();render();message("プロジェクトを開きました。素材を選び直してください。");e.target.value="";});
 $("#srt").onclick=safely(()=>{const content=exportSrt(project,$("#srt-language").value);if(!content)throw new Error("確認済みの時刻を確認してください。");blobDownload(content,"lyrics.srt","application/x-subrip;charset=utf-8");});
 document.addEventListener("keydown",safely(e=>{if(e.target.closest("input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));

@@ -25,6 +25,24 @@ export function newProject(raw = "") {
     assets: {media: null, audio: null, background: null}, alignment: null};
 }
 
+export function updateLyrics(project, raw, {resetTiming = false} = {}) {
+  const lyrics = String(raw), parsed = parseLyrics(lyrics);
+  if (!parsed.length) throw new Error("歌詞を1行以上貼り付けてください。");
+  // Only an identical ordered list of subtitle texts proves row identity.
+  // Match repeated rows by position; never guess a correspondence after edits.
+  const sameRows = parsed.length === project.lines.length &&
+    parsed.every((line, i) => line.text === project.lines[i].text);
+  if (project.lines.length && !sameRows && !resetTiming) {
+    throw new Error("本文・順序・行数が変わっています。変更はまだ反映していません。「歌詞を反映」で時刻のリセットを確認してから、再同期してください。既存の時刻と自動保存は保持しています。");
+  }
+  const next = clone(project);
+  next.lyrics = lyrics;
+  next.lines = sameRows ? parsed.map((line, i) => ({...next.lines[i],
+    sourceLine: line.sourceLine, section: line.section})) : parsed;
+  if (!sameRows) next.alignment = null;
+  return next;
+}
+
 export function normalizeStyle(value = {}) {
   const color = candidate => /^#[0-9a-f]{6}$/i.test(candidate || "");
   return {mode: value.mode === "scroll" ? "scroll" : "subtitle", fontId:normalizeFont(value.fontId),
