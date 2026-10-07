@@ -150,12 +150,25 @@ export function shiftTiming(project, id, delta) {
 }
 
 export function timingIssues(project) {
-  return globalThis.LyricSrtCore.analyzeProject(project.lines.map(l=>({jp:l.text,en:"",start:l.start,end:l.end})),project.duration).issues;
+  const issues = globalThis.LyricSrtCore.analyzeProject(project.lines.map(l=>({jp:l.text,en:"",
+    start:validTime(l.start)?l.start:null,end:validTime(l.end)?l.end:null})),project.duration).issues;
+  // The legacy SRT editor can infer ends; video rows require both recorded edges.
+  project.lines.forEach((line,index)=>{
+    if(!validTime(line.end))issues.push({index,severity:"error",code:"end-unrecorded",message:"終了時刻が未記録です。終了を記録してください。"});
+  });
+  return issues;
 }
 
 export function cues(project, confirmedOnly = false) {
   return project.lines.filter(l => validTime(l.start) && validTime(l.end) && l.end > l.start &&
     l.start >= 0 && l.end <= project.duration + .15 && (!confirmedOnly || !l.review));
+}
+
+export function candidateSeekTime(line, duration) {
+  if(!line || !validTime(duration) || Number(duration)<=0 || cues({lines:[line],duration}).length)return null;
+  const start=line.auto?.candidateStart, end=line.auto?.candidateEnd;
+  if(!validTime(start)||!validTime(end)||Number(start)<0||Number(end)<=Number(start)||Number(end)>Number(duration))return null;
+  return Math.max(0,Number(start)-.5);
 }
 
 // An audition includes valid candidates without silently approving the saved rows.

@@ -1,5 +1,5 @@
 import {newProject,loadProject,saveProject,updateLyrics,applyAlignment,editTiming,confirmLine,
-  cues,exportSrt,drawLyrics,History,validTime,activeCue,shiftTiming,timingIssues} from "./core.js";
+  cues,exportSrt,drawLyrics,History,validTime,activeCue,shiftTiming,timingIssues,candidateSeekTime} from "./core.js";
 import {FONTS,normalizeFont} from "./font-catalog.js";
 import {ensureFont} from "./fonts.js";
 import {drawComposite} from "./preview-render.js";
@@ -18,6 +18,7 @@ editOverlay.width=1920;editOverlay.height=1080;
 const editOverlayCtx=editOverlay.getContext("2d");
 const message=(text,error=false)=>{for(const id of ["#message","#edit-message","#preview-message"]){$(id).textContent=id==="#message"||error?text:"";$(id).classList.toggle("error",error);}};
 const timeLabel=t=>`${String(Math.floor(Math.max(0,t)/60)).padStart(2,"0")}:${(Math.max(0,t)%60).toFixed(3).padStart(6,"0")}`;
+const candidateLabel=t=>validTime(t)?timeLabel(Number(t)):"なし";
 const escape=text=>String(text??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const clock=()=>project.assets.media?.kind==="video"?video:audio;
 const signature=()=>JSON.stringify(project.lines.map(l=>[l.id,l.text,l.alignmentText]));
@@ -65,6 +66,14 @@ async function listenRow(id=selected){
   const line=project.lines.find(l=>l.id===id);
   if(!validTime(line?.start))throw new Error("先にこの行の開始時刻を指定してください。");
   selectRow(id);if(clock().paused)await playback();
+}
+function seekCandidate(id){
+  const line=project.lines.find(l=>l.id===id),target=candidateSeekTime(line,project.duration);
+  if(target===null)throw new Error("素材の範囲内に有効な自動候補がありません。再生位置を選んで開始・終了を記録してください。");
+  if(!project.assets.media?.id||!clock().getAttribute("src")||clock().readyState<1)throw new Error("先に素材を選択して、読み込みが終わるまでお待ちください。");
+  if(project.assets.media.kind==="video"&&!project.assets.media.hasAudio&&!project.assets.audio?.id)throw new Error("音声がない動画には音源を追加してください。");
+  selectRow(id,false);seekTo(target);
+  message("自動候補の0.5秒手前（曲頭では0秒）へ移動しました。時刻は未確定です。聴いて「開始を記録」「終了を記録」で修正してください。");
 }
 function unload(){video.pause();audio.pause();[video,audio].forEach(el=>{el.removeAttribute("src");el.load();});$("#background").removeAttribute("src");$("#background").hidden=true;}
 function attachMedia(){
@@ -136,17 +145,19 @@ function selectionLabels(){
 function render(){
   if(!project.lines.some(l=>l.id===selected)) selected=project.lines[0]?.id;
   selectionLabels();
-  $("#review-count").textContent=`${project.lines.length}行 / 要確認 ${project.lines.filter(l=>l.review).length} / 確認済み ${cues(project,true).length}`;
+  const placedIds=new Set(cues(project).map(l=>l.id));
+  const rowState=l=>placedIds.has(l.id)?l.review?"要確認":"確認済み":!validTime(l.start)&&!validTime(l.end)?"未配置":!validTime(l.start)?"開始未記録":!validTime(l.end)?"終了未記録":"時刻要修正";
+  $("#review-count").textContent=`${project.lines.length}行 / 未配置 ${project.lines.length-placedIds.size} / 要確認 ${project.lines.filter(l=>l.review).length} / 確認済み ${cues(project,true).length}`;
   const issues=timingIssues(project);
   $("#quality-count").textContent=`品質チェック：${issues.filter(i=>i.severity==="error").length}件のエラー / ${issues.filter(i=>i.severity==="warning").length}件の注意（前後の重なりを含む）`;
   ["all","review"].forEach(f=>$("#filter-"+f).setAttribute("aria-pressed",String(rowFilter===f)));
   const visible=project.lines.map((l,i)=>({l,i})).filter(({l})=>rowFilter!=="review"||l.review);
   $("#rows").innerHTML=visible.length?visible.map(({l,i})=>`<article class="lyric-row ${l.id===selected?"selected":""}" data-id="${escape(l.id)}">
     <button class="row-number" data-action="select" aria-label="${i+1}行目を選択して付近へ移動">${i+1}</button>
-    <div><div class="row-text">${escape(l.text)}</div><span class="row-state ${!l.review?"confirmed":""}">${l.review?"要確認":"確認済み"}${l.manual.start||l.manual.end?" · 手動修正":""}</span></div>
-    <div class="row-tools"><div class="row-shift"><button data-action="shift" data-delta="-.1" title="行全体の開始・終了を0.1秒早める">0.1秒早める</button><button data-action="shift" data-delta=".1" title="行全体の開始・終了を0.1秒遅らせる">0.1秒遅らせる</button></div>${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒早める">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒遅らせる">＋0.1</button></div></div>`).join("")}<button data-action="listen">この行を聴く</button><button data-action="confirm" ${!validTime(l.start)||!validTime(l.end)?"disabled":""}>確認済みにする</button></div>
+    <div><div class="row-text">${escape(l.text)}</div><span class="row-state ${placedIds.has(l.id)&&!l.review?"confirmed":""}">${rowState(l)}${l.manual.start||l.manual.end?" · 手動修正":""}</span></div>
+    <div class="row-tools"><div class="row-shift"><button data-action="shift" data-delta="-.1" title="行全体の開始・終了を0.1秒早める">0.1秒早める</button><button data-action="shift" data-delta=".1" title="行全体の開始・終了を0.1秒遅らせる">0.1秒遅らせる</button></div>${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒早める">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒遅らせる">＋0.1</button></div></div>`).join("")}<button data-action="listen">この行を聴く</button>${!placedIds.has(l.id)?`<button data-action="candidate" ${candidateSeekTime(l,project.duration)===null?"disabled":""}>候補付近へ移動</button>`:""}<button data-action="confirm" ${!placedIds.has(l.id)?"disabled":""}>確認済みにする</button></div>
     ${issues.filter(issue=>issue.index===i).map(issue=>`<p class="row-details quality-warning">${escape(issue.message)}</p>`).join("")}
-    <details class="row-details"><summary>照合用テキストと確認理由</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${timeLabel(l.auto.candidateStart??l.auto.start??0)} → ${timeLabel(l.auto.candidateEnd??l.auto.end??0)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):rowFilter==="review"&&project.lines.length?"<p class='hint'>要確認の行はありません。「すべて」で任意の行を修正できます。</p>":"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
+    <details class="row-details"><summary>照合用テキストと確認理由</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${candidateLabel(l.auto.candidateStart??l.auto.start)} → ${candidateLabel(l.auto.candidateEnd??l.auto.end)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):rowFilter==="review"&&project.lines.length?"<p class='hint'>要確認の行はありません。「すべて」で任意の行を修正できます。</p>":"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
   refreshHistory();draw();
   document.body.classList.toggle("row-input-focus",Boolean(document.activeElement?.closest("#rows input")));
 }
@@ -239,6 +250,7 @@ $("#rows").onclick=safely(async e=>{
   const id=button.closest("[data-id]").dataset.id,row=project.lines.find(l=>l.id===id);
   if(button.dataset.action==="select"){selectRow(id);return;}
   if(button.dataset.action==="listen"){await listenRow(id);return;}
+  if(button.dataset.action==="candidate"){seekCandidate(id);return;}
   selected=id;selectionLabels();
   if(button.dataset.action==="confirm") commit(confirmLine(project,id));
   if(button.dataset.action==="shift")commit(shiftTiming(project,id,Number(button.dataset.delta)));

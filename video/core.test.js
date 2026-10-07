@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {parseLyrics, newProject, updateLyrics, loadProject, saveProject, applyAlignment, editTiming, confirmLine,
-  History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject, shiftTiming, timingIssues} from "./core.js";
+  History, cues, activeCue, exportSrt, layoutScene, wrapText, videoExportProject, shiftTiming, timingIssues, candidateSeekTime} from "./core.js";
 import {FONTS,normalizeFont,fontFamily} from "./font-catalog.js";
 
 const fixture = () => {
@@ -174,6 +174,82 @@ test("invalid, missing and reversed times are excluded and cannot be confirmed",
   p.lines[0].start=-1;p.lines[0].end=2;assert.throws(()=>confirmLine(p,"line-0"));
   assert.throws(()=>editTiming(p,"line-0","start",false));
 });
+test("partial video times report missing edges and never enter SRT or video output",()=>{
+  const p=newProject("赤い箱\n青い箱\n白い箱\n緑の箱");p.duration=10;
+  Object.assign(p.lines[0],{start:1,end:null,review:false});
+  Object.assign(p.lines[1],{start:null,end:4,review:false});
+  Object.assign(p.lines[3],{start:6,end:8,review:false});
+  const issues=timingIssues(p);
+  assert.ok(issues.some(i=>i.index===0&&i.code==="end-unrecorded"&&i.severity==="error"));
+  assert.ok(issues.some(i=>i.index===1&&i.code==="unrecorded"&&i.severity==="error"));
+  assert.deepEqual(issues.filter(i=>i.index===2).map(i=>i.code).sort(),["end-unrecorded","unrecorded"]);
+  assert.equal(issues.some(i=>i.index===3),false);
+  assert.deepEqual(cues(p).map(l=>l.id),["line-3"]);
+  for(const audition of [true,false])assert.deepEqual(videoExportProject(p,audition).lines.map(l=>l.id),["line-3"]);
+  const srt=exportSrt(p);assert.match(srt,/緑の箱/);assert.doesNotMatch(srt,/赤い箱|青い箱|白い箱/);
+});
+
+test("nonfinite and non-time edges are diagnosed instead of using legacy automatic ends",()=>{
+  for(const invalid of [NaN,Infinity,undefined,"",false,true]){
+    const p=newProject("赤い箱");p.duration=10;
+    p.lines[0].start=1;p.lines[0].end=invalid;
+    assert.ok(timingIssues(p).some(i=>i.code==="end-unrecorded"&&i.severity==="error"));
+    assert.deepEqual(cues(p),[]);assert.throws(()=>confirmLine(p,"line-0"));
+    p.lines[0].start=invalid;p.lines[0].end=2;
+    assert.ok(timingIssues(p).some(i=>i.code==="unrecorded"&&i.severity==="error"));
+    assert.deepEqual(cues(p),[]);
+  }
+});
+
+test("candidate navigation is bounded and leaves unplaced row evidence untouched",()=>{
+  const p=newProject("赤い箱");p.duration=10;
+  const row=p.lines[0];row.auto={candidateStart:4,candidateEnd:4.3};
+  const original=structuredClone(p);
+  assert.equal(candidateSeekTime(row,p.duration),3.5);
+  assert.deepEqual(p,original);
+  for(const start of [0,.2,.5])assert.equal(candidateSeekTime({...row,auto:{candidateStart:start,candidateEnd:1}},10),0);
+  assert.equal(candidateSeekTime({...row,auto:{candidateStart:"4",candidateEnd:"4.3"}},10),3.5);
+  for(const review of [true,false])assert.equal(candidateSeekTime({...row,start:1,end:2,review},10),null);
+});
+
+test("missing invalid reversed or out-of-media candidate intervals cannot navigate",()=>{
+  const row=newProject("赤い箱").lines[0];
+  for(const [start,end] of [[null,null],[null,2],[1,null],[-1,2],[1,11],[2,1],[1,1],
+                          [NaN,2],[1,NaN],[Infinity,2],[1,Infinity],["",2],[false,2],[1,true],["not a time",2]]){
+    assert.equal(candidateSeekTime({...row,auto:{candidateStart:start,candidateEnd:end}},10),null);
+  }
+  for(const duration of [0,-1,NaN,Infinity,null,undefined,false])assert.equal(candidateSeekTime({...row,auto:{candidateStart:1,candidateEnd:2}},duration),null);
+  assert.equal(candidateSeekTime(row,10),null);
+  assert.equal(candidateSeekTime(null,10),null);
+});
+
+test("candidate rescue requires both recording operations and explicit confirmation",()=>{
+  let p=newProject("赤い箱");p.duration=10;
+  p.lines[0].auto={candidateStart:4,candidateEnd:4.3};
+  const original=structuredClone(p),h=new History();
+  assert.equal(candidateSeekTime(p.lines[0],10),3.5);
+  assert.equal(exportSrt(p),"");assert.deepEqual(cues(p),[]);
+  p=h.change(p,editTiming(p,"line-0","start",4));
+  assert.deepEqual(cues(p),[]);assert.throws(()=>confirmLine(p,"line-0"));
+  assert.ok(timingIssues(p).some(i=>i.code==="end-unrecorded"));
+  p=h.change(p,editTiming(p,"line-0","end",5));
+  assert.equal(exportSrt(p),"");assert.equal(p.lines[0].review,true);
+  assert.deepEqual(p.lines[0].auto,original.lines[0].auto);
+  p=h.change(p,confirmLine(p,"line-0"));
+  assert.match(exportSrt(p),/00:00:04,000 --> 00:00:05,000/);
+  p=h.undo(p);p=h.undo(p);p=h.undo(p);assert.deepEqual(p,original);
+});
+
+test("partial placement and candidate navigation survive JSON save and reload",()=>{
+  const p=newProject("赤い箱");p.duration=10;
+  Object.assign(p.lines[0],{start:4,end:null,manual:{start:true,end:false},auto:{candidateStart:4,candidateEnd:4.3}});
+  const restored=loadProject(JSON.parse(JSON.stringify(saveProject(p))));
+  assert.deepEqual(restored.lines,p.lines);
+  assert.equal(candidateSeekTime(restored.lines[0],restored.duration),3.5);
+  assert.ok(timingIssues(restored).some(i=>i.code==="end-unrecorded"));
+  assert.deepEqual(videoExportProject(restored,true).lines,[]);
+});
+
 test("subtitle clears during intro, interlude, outro and half-open cue ends", () => {
   const p = fixture();
   [0,4,6,19].forEach(t => assert.equal(activeCue(p,t),null));
