@@ -185,9 +185,11 @@ def run_job(identifier, kind, body):
                 job["status"] = "cancelled"
                 terminate_owned_process(process)
             log_path = folder / "worker.log"
+            output_tail = ""
             with log_path.open("w", encoding="utf-8") as log:
                 for line in process.stdout:
                     log.write(line); log.flush()
+                    output_tail = (output_tail + line)[-8000:]
                     try:
                         progress = json.loads(line)
                         if isinstance(progress, dict) and "stage" in progress and job["status"] != "cancelled":
@@ -198,6 +200,12 @@ def run_job(identifier, kind, body):
             if job["status"] == "cancelled":
                 return
             if returncode:
+                if kind == "align" and any(marker in output_tail.lower() for marker in
+                                          ["memory allocation", "out of memory", "cannot allocate memory", "defaultcpuallocator"]):
+                    recovery = ("音声認識モデルを「small」に変更して再試行してください。" if body.get("method") == "asr" else
+                                "「同期処理の選択」で方式を「音声認識のみ」に切り替えて再試行してください。必要ならモデルを「small」に変更してください。")
+                    raise ValueError("PCのメモリ不足で同期処理が停止しました。" + recovery +
+                                     "入力素材と歌詞はそのまま使えます。詳細はローカルworker.logに保存しました。")
                 raise ValueError("処理に失敗しました。モデル取得・空きメモリ・FFmpegを確認し、再試行してください。詳細はローカルworker.logに保存しました。")
             if kind == "align":
                 result = json.loads(result_path.read_text(encoding="utf-8"))

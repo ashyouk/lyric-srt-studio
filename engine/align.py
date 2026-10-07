@@ -20,7 +20,10 @@ def select_asr_model(request):
 
 
 def normalized(text):
-    return "".join(c for c in unicodedata.normalize("NFKC", str(text)).lower()
+    # Matching only: this unambiguous old glyph does not change display text
+    # or guess kana/kanji/proper-name pronunciations.
+    value = unicodedata.normalize("NFKC", str(text)).lower().replace("聲", "声")
+    return "".join(c for c in value
                    if c.isalnum())
 
 
@@ -55,8 +58,17 @@ def aggregate(lines, words, recognized, duration):
         end = round(max((s[1] for s in spans), default=-1), 3)
         reasons = ["歌唱への自動推定です。再生して確認してください。"]
         valid = bool(spans) and 0 <= start < end <= duration + .15
+        start_matched = left < right and left in matches
+        end_matched = left < right and right - 1 in matches
         if not valid:
             reasons.append("有効な歌声区間を確定できませんでした。")
+        if spans and not (start_matched and end_matched):
+            reasons.append("行の先頭または末尾に音響時刻がない部分候補です。境界を再生して確認してください。")
+            # A sub-half-second fragment is not evidence for the whole row.
+            # Keep longer existing candidates for review; never pad or shift them.
+            if end - start < .5:
+                reasons.append("0.5秒未満の短い部分候補を行全体の時刻に採用していません。")
+                valid = False
         if agreement < .45:
             reasons.append("独立した音声認識との一致が少ないため、未歌唱・表記・繰り返しを確認してください。")
             valid = False
@@ -72,7 +84,8 @@ def aggregate(lines, words, recognized, duration):
             "candidateEnd": end if end >= 0 else None,
             "review": True, "reasons": reasons,
             "evidence": {"asrCharacterAgreement": round(agreement, 4),
-                         "matchedCharacters": len(spans), "inputCharacters": right - left},
+                         "matchedCharacters": len(spans), "inputCharacters": right - left,
+                         "startCharacterMatched": start_matched, "endCharacterMatched": end_matched},
         })
         if valid:
             previous_end = end

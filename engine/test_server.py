@@ -73,6 +73,31 @@ class LocalBoundaryTests(unittest.TestCase):
             self.assertEqual(job['status'],'cancelled')
             self.assertNotIn('result',job)
 
+    def test_memory_failure_reports_existing_recovery_without_retrying_or_exposing_worker_output(self):
+        for kind, method in [('align', 'qwen'), ('align', 'asr'), ('export', 'qwen')]:
+            with self.subTest(kind=kind, method=method), TemporaryDirectory(prefix='lyric-memory-test-') as temporary:
+                source={'id':'source', 'path':Path(temporary)/'input.wav', 'duration':2, 'hasAudio':True}
+                process=MagicMock()
+                process.stdout=['memory allocation of 6291456 bytes failed: PRIVATE_WORKER_DETAIL\n']
+                process.wait.return_value=-1073740791
+                job={'id':'memory-test', 'status':'queued', 'started':time.monotonic()}
+                with patch.dict(server.jobs, {'memory-test':job}, clear=True), \
+                     patch.object(server,'JOBS',Path(temporary)), patch.object(server,'asset',return_value=source), \
+                     patch.object(server.subprocess,'Popen',return_value=process) as spawn:
+                    server.run_job('memory-test',kind,{'project':{},'lines':[{'id':'one','text':'歌'}],'method':method})
+                self.assertEqual(job['status'],'failed')
+                self.assertNotIn('result',job)
+                self.assertNotIn('PRIVATE_WORKER_DETAIL',job['message'])
+                spawn.assert_called_once()
+                if kind == 'align':
+                    self.assertIn('メモリ不足',job['message'])
+                    self.assertIn('small',job['message'])
+                    self.assertIn('入力素材と歌詞はそのまま',job['message'])
+                    self.assertEqual('音声認識のみ' in job['message'],method == 'qwen')
+                else:
+                    self.assertNotIn('音声認識のみ',job['message'])
+                    self.assertIn('FFmpeg',job['message'])
+
     def test_queued_job_cancels_without_starting_a_model(self):
         with server.worker_lock:
             job = self.client.post('/api/jobs/align', json={'mediaId':'missing'}).json()['id']

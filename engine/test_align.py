@@ -43,6 +43,62 @@ class AlignmentMappingTests(unittest.TestCase):
     def test_punctuation_normalization_is_only_matching(self):
         self.assertEqual(normalized("ＡＢＣ！ 星、"), "abc星")
 
+    def test_missing_row_edges_preserve_partial_evidence_without_adopting_times(self):
+        cases = [
+            ("赤い箱", "い箱"),
+            ("Blue box", "Blue bo"),
+        ]
+        for text, fragment in cases:
+            with self.subTest(text=text):
+                row = aggregate([{"id":"a","text":text}],
+                    [{"text":fragment,"start_time":1,"end_time":1.3}], fragment, 10)[0]
+                self.assertIsNone(row["start"])
+                self.assertIsNone(row["end"])
+                self.assertEqual((row["candidateStart"],row["candidateEnd"]),(1,1.3))
+                self.assertTrue(row["review"])
+                self.assertTrue(any("部分候補" in reason for reason in row["reasons"]))
+
+    def test_longer_partial_candidate_is_preserved_for_review_without_a_time_shift(self):
+        row = aggregate([{"id":"a","text":"赤い箱"}],
+                        [{"text":"い箱","start_time":1,"end_time":2}],"い箱",10)[0]
+        self.assertEqual((row["start"],row["end"]),(1,2))
+        self.assertFalse(row["evidence"]["startCharacterMatched"])
+        self.assertTrue(row["evidence"]["endCharacterMatched"])
+        self.assertTrue(row["review"])
+
+    def test_old_glyph_matches_all_real_word_times_without_rewriting_input(self):
+        lines = [{"id":"a","text":"小さな聲","alignmentText":"小さな聲"}]
+        row = aggregate(lines,[{"text":"小さな","start_time":1,"end_time":1.4},
+                               {"text":"声","start_time":1.4,"end_time":2}],"小さな声",10)[0]
+        self.assertEqual((row["start"],row["end"]),(1,2))
+        self.assertEqual(row["evidence"]["matchedCharacters"],4)
+        self.assertEqual(lines[0]["text"],"小さな聲")
+        self.assertEqual(lines[0]["alignmentText"],"小さな聲")
+        self.assertTrue(row["review"])
+
+    def test_inexact_outro_voicing_and_proper_names_are_not_guessed(self):
+        self.assertNotEqual(normalized("だ"),normalized("た"))
+        self.assertNotEqual(normalized("架空町"),normalized("想像村"))
+        row = aggregate([{"id":"a","text":"あそこです。"}],
+                        [{"text":"アソコデ","start_time":3,"end_time":4}],"アソコデ",10)[0]
+        self.assertIsNone(row["start"])
+        self.assertIsNone(row["end"])
+        self.assertTrue(row["review"])
+
+    def test_explicit_matching_reading_uses_full_evidence_and_keeps_display_text(self):
+        lines = [{"id":"a","text":"青い箱","alignmentText":"あおいはこ"}]
+        row = aggregate(lines,[{"text":"あおい","start_time":1,"end_time":1.4},
+                               {"text":"はこ","start_time":1.4,"end_time":2}],"あおいはこ",10)[0]
+        self.assertEqual((row["start"],row["end"]),(1,2))
+        self.assertEqual(lines[0]["text"],"青い箱")
+        self.assertTrue(row["review"])
+
+    def test_short_fully_matched_row_is_not_padded_or_rejected(self):
+        row = aggregate([{"id":"a","text":"箱だ"}],
+                        [{"text":"箱だ","start_time":1,"end_time":1.2}],"箱だ",10)[0]
+        self.assertEqual((row["start"],row["end"]),(1,1.2))
+        self.assertTrue(row["review"])
+
     def test_real_energy_edges_are_trimmed_without_uniform_division(self):
         import numpy as np
         audio = np.concatenate([np.zeros(3200), np.ones(9600) * .1, np.zeros(3200)]).astype("float32")
