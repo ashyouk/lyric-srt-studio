@@ -8,6 +8,8 @@
 
 ## 利用URLと構成
 
+0.3.1公開コミット：`dd40465232d054d66479adb78d8ac516547f548e`。Pagesの該当コミットが `built` / `error: null` になり、公開URLでも38項目すべて成功しました（API要求0・POST等0・他オリジン要求0・ブラウザエラー0）。旧ルートはHTTP 200・v2.3.3のまま、元のmainから `video/` 外に差分がないことも確認しました。
+
 - https://ashyouk.github.io/lyric-srt-studio/video/editor.html
 - 静的HTML/JS/CSSと既存のOFLフォントだけを配信します。音源やプロジェクトは利用者が端末のファイル選択で開き、Blob URLで再生します。
 - PCの自動同期API、素材保存領域、認証付きトンネルを公開する変更ではありません。別コマンドで以前拒否されたプロセスを起動する変更もありません。
