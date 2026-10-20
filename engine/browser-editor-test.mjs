@@ -44,12 +44,30 @@ try{
   await page.goto(base+'video/editor.html');await page.waitForFunction(()=>window.studio);
   check('static entry works under a GitHub Pages-style subdirectory',page.url().includes('/lyric-srt-studio/video/index.html?mode=browser'));
   check('browser mode hides unavailable automatic sync/MP4 and declares local processing',await page.evaluate(()=>studio.inspection().runtime==='browser'&&document.querySelector('#align').hidden&&document.querySelector('#export').hidden&&document.querySelector('.privacy').textContent.includes('外部へ送信しません')));
+  check('guides default OFF without hiding status messages',await page.evaluate(()=>document.querySelector('#guide-toggle').getAttribute('aria-pressed')==='false'&&getComputedStyle(document.querySelector('#engine-state')).display==='none'&&getComputedStyle(document.querySelector('#message')).display!=='none'));
+  await page.locator('#guide-toggle').click();
+  check('guide switch reveals supplementary copy',await page.evaluate(()=>document.querySelector('#guide-toggle').getAttribute('aria-pressed')==='true'&&getComputedStyle(document.querySelector('#engine-state')).display!=='none'));
+  await page.reload();await page.waitForFunction(()=>window.studio);
+  check('guide preference survives reload',await page.locator('#guide-toggle').getAttribute('aria-pressed')==='true');
+  await page.locator('#guide-toggle').click();
+  const initial=await page.evaluate(()=>JSON.stringify(studio.snapshot()));
+  await page.locator('#editor-help-open').click();
+  check('help dialog opens with illustrated instructions',await page.locator('#editor-help').isVisible()&&await page.locator('#editor-help .ui-icon').count()>3);
+  await page.keyboard.press('Escape');
+  check('help closes and restores focus without changing project',await page.evaluate(expected=>!document.querySelector('#editor-help').open&&document.activeElement.id==='editor-help-open'&&JSON.stringify(studio.snapshot())===expected,initial));
+  check('compact controls retain visible labels and accessible names',await page.evaluate(()=>['play','record-start','fixed-undo','save-project'].every(id=>{const b=document.getElementById(id);return b.querySelector('.ui-icon')&&b.querySelector('.control-label')?.textContent&&b.getAttribute('aria-label');})));
+  await page.locator('#record-start').click();
+  check('recording error remains visible with guides OFF',await page.evaluate(()=>document.querySelector('#message').classList.contains('error')&&document.querySelector('#message').textContent.length>0&&getComputedStyle(document.querySelector('#message')).display!=='none'));
+  await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:resolve(output,'top-390.png')});
   await page.locator('#browser-project-file').setInputFiles({name:'pc-result.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(fixture))});
   await page.waitForFunction(()=>studio.snapshot().lines.length===3);
   check('PC project imports canonical repeated lyrics and estimates, never saved remote URLs',await page.evaluate(()=>studio.snapshot().lines[1].text===studio.snapshot().lines[2].text&&!studio.snapshot().assets.media.url&&studio.snapshot().lines[0].auto.evidence.matchedCharacters===3));
   await page.locator('#media-file').setInputFiles(audioPath);
   await page.waitForFunction(()=>studio.snapshot().assets.media?.source==='browser-file'&&document.querySelector('#audio').readyState>=1);
   check('real WAV metadata loads through a local blob, not a server upload',await page.evaluate(()=>studio.snapshot().assets.media.url.startsWith('blob:')&&studio.snapshot().duration>20&&studio.snapshot().lines[0].start===1));
+  const beforeHelp=await page.evaluate(()=>({project:JSON.stringify(studio.snapshot()),past:studio.inspection().past}));
+  await page.locator('#editor-help-open').click();await page.keyboard.press('e');await page.keyboard.press('Space');await page.locator('#editor-help-close').click();
+  check('help prevents editing shortcuts from modifying project or history',await page.evaluate(expected=>JSON.stringify(studio.snapshot())===expected.project&&studio.inspection().past===expected.past,beforeHelp));
   await page.locator('#play').click();await page.waitForFunction(()=>studio.currentTime()>.1);await page.locator('#play').click();
   check('real audio plays and pauses without a processing PC',await page.evaluate(()=>studio.inspection().paused&&studio.currentTime()>.1));
   const imported=await page.evaluate(()=>studio.snapshot());
@@ -89,6 +107,7 @@ try{
   await page.locator('#fixed-undo').click();check('Undo reaches the detached preview',await popup.evaluate(()=>opener.studioPreview.getState().project.lines[0].start===1.1));
   await popup.close();await page.waitForFunction(()=>!studio.inspection().detached);
   check('closing detached preview restores embedded editing',await page.locator('#edit-canvas').isVisible());
+  check('playback, history and detached controls keep their icons after updates',await page.evaluate(()=>['edit-play','fixed-undo','edit-open-preview'].every(id=>document.getElementById(id).querySelector('.ui-icon'))));
   for(const [width,height] of [[320,740],[390,844],[768,1024],[1024,768],[1365,900]]){
     await page.setViewportSize({width,height});
     check(`no horizontal overflow and 44px fixed targets at ${width}`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&[...document.querySelectorAll('.floating button')].every(b=>b.getBoundingClientRect().height>=44)));

@@ -4,9 +4,11 @@ import {FONTS,normalizeFont} from "./font-catalog.js";
 import {ensureFont} from "./fonts.js";
 import {drawComposite} from "./preview-render.js";
 import {BrowserMedia,attachBrowserAsset,isBrowserEditor} from "./browser-media.js";
+import {controlMarkup,setControl,installEditorGuides} from "./editor-ui.js?v=0.3.1";
 
 const $=selector=>document.querySelector(selector);
 const LOCAL=isBrowserEditor(location.href);
+const compact=(icon,short,long)=>LOCAL?controlMarkup(icon,short):long;
 const localMedia=LOCAL?new BrowserMedia():null;
 const localRequests={media:0,audio:0,background:0};
 const STORAGE=LOCAL?"lyric-srt-browser-editor-v1":"lyric-video-studio-prototype-v1";
@@ -37,7 +39,7 @@ async function api(path,options={}) {
 const safely=fn=>async event=>{try{await fn(event);}catch(error){message(error.message,true);}};
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify(saveProject(project)));}catch{message("自動保存できません。プロジェクトファイルを保存してください。",true);}}
 function commit(next){if(JSON.stringify(next)===JSON.stringify(project))return;project=history.change(project,next);persist();render();}
-function refreshHistory(){["#undo","#fixed-undo"].forEach(s=>$(s).disabled=!history.past.length);["#redo","#fixed-redo"].forEach(s=>$(s).disabled=!history.future.length);$("#undo").textContent=`↶ 戻る ${history.past.length}`;$("#redo").textContent=`↷ やり直す ${history.future.length}`;}
+function refreshHistory(){["#undo","#fixed-undo"].forEach(s=>$(s).disabled=!history.past.length);["#redo","#fixed-redo"].forEach(s=>$(s).disabled=!history.future.length);if(LOCAL){for(const [id,icon,label,count] of [["undo","undo","戻る",history.past.length],["redo","redo","やり直す",history.future.length],["fixed-undo","undo","戻る",history.past.length],["fixed-redo","redo","やり直す",history.future.length]])setControl($("#"+id),icon,id.startsWith("fixed")?label:`${label} ${count}`,`${label}（履歴 ${count}件）`);}else{$("#undo").textContent=`↶ 戻る ${history.past.length}`;$("#redo").textContent=`↷ やり直す ${history.future.length}`;}}
 function switchTab(tab,focus=false){
   activeTab=tab==="editing"?"editing":"production";
   for(const name of ["production","editing"]){const active=name===activeTab;$("#"+name+"-panel").hidden=!active;const button=$("#tab-"+name);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;}
@@ -45,7 +47,7 @@ function switchTab(tab,focus=false){
 }
 function visualSource(){return project.assets.media?.kind==="video"?video:project.assets.background?.url?$("#background"):null;}
 function previewState(){return {project,time:clock().currentTime||0,paused:clock().paused,selected,playingId:activeCue(project,clock().currentTime||0)?.id||null};}
-function syncDetached(){const detached=Boolean(previewWindow&&!previewWindow.closed);$("#stage").hidden=detached;$("#detached-note").hidden=!detached;["#return-preview","#edit-return-preview"].forEach(s=>$(s).hidden=!detached);["#open-preview","#edit-open-preview"].forEach(s=>$(s).textContent=detached?"別窓を表示":"別窓で開く");}
+function syncDetached(){const detached=Boolean(previewWindow&&!previewWindow.closed);$("#stage").hidden=detached;$("#detached-note").hidden=!detached;["#return-preview","#edit-return-preview"].forEach(s=>$(s).hidden=!detached);["#open-preview","#edit-open-preview"].forEach(s=>{if(LOCAL)setControl($(s),"popup","別窓",detached?"開いている別窓を表示":"プレビューを別窓で開く");else $(s).textContent=detached?"別窓を表示":"別窓で開く";});}
 function previewClosed(child){
   if(child&&child!==previewWindow)return;
   previewWindow=null;if(previewPoll){clearInterval(previewPoll);previewPoll=null;}syncDetached();draw();
@@ -166,15 +168,16 @@ function render(){
   const rowState=l=>placedIds.has(l.id)?l.review?"要確認":"確認済み":!validTime(l.start)&&!validTime(l.end)?"未配置":!validTime(l.start)?"開始未記録":!validTime(l.end)?"終了未記録":"時刻要修正";
   $("#review-count").textContent=`${project.lines.length}行 / 未配置 ${project.lines.length-placedIds.size} / 要確認 ${project.lines.filter(l=>l.review).length} / 確認済み ${cues(project,true).length}`;
   const issues=timingIssues(project);
-  $("#quality-count").textContent=`品質チェック：${issues.filter(i=>i.severity==="error").length}件のエラー / ${issues.filter(i=>i.severity==="warning").length}件の注意（前後の重なりを含む）`;
+  const errorCount=issues.filter(i=>i.severity==="error").length,warningCount=issues.filter(i=>i.severity==="warning").length;
+  $("#quality-count").textContent=LOCAL?`品質：エラー ${errorCount} / 注意 ${warningCount}`:`品質チェック：${errorCount}件のエラー / ${warningCount}件の注意（前後の重なりを含む）`;
   ["all","review"].forEach(f=>$("#filter-"+f).setAttribute("aria-pressed",String(rowFilter===f)));
   const visible=project.lines.map((l,i)=>({l,i})).filter(({l})=>rowFilter!=="review"||l.review);
   $("#rows").innerHTML=visible.length?visible.map(({l,i})=>`<article class="lyric-row ${l.id===selected?"selected":""}" data-id="${escape(l.id)}">
     <button class="row-number" data-action="select" aria-label="${i+1}行目を選択して付近へ移動">${i+1}</button>
     <div><div class="row-text">${escape(l.text)}</div><span class="row-state ${placedIds.has(l.id)&&!l.review?"confirmed":""}">${rowState(l)}${l.manual.start||l.manual.end?" · 手動修正":""}</span></div>
-    <div class="row-tools"><div class="row-shift"><button data-action="shift" data-delta="-.1" title="行全体の開始・終了を0.1秒早める">0.1秒早める</button><button data-action="shift" data-delta=".1" title="行全体の開始・終了を0.1秒遅らせる">0.1秒遅らせる</button></div>${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒早める">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒遅らせる">＋0.1</button></div></div>`).join("")}<button data-action="listen">この行を聴く</button>${!placedIds.has(l.id)?`<button data-action="candidate" ${candidateSeekTime(l,project.duration)===null?"disabled":""}>候補付近へ移動</button>`:""}<button data-action="confirm" ${!placedIds.has(l.id)?"disabled":""}>確認済みにする</button></div>
+    <div class="row-tools"><div class="row-shift"><button data-action="shift" data-delta="-.1" title="行全体の開始・終了を0.1秒早める" aria-label="${i+1}行目全体を0.1秒早める">${compact("earlier","−0.1秒","0.1秒早める")}</button><button data-action="shift" data-delta=".1" title="行全体の開始・終了を0.1秒遅らせる" aria-label="${i+1}行目全体を0.1秒遅らせる">${compact("later","＋0.1秒","0.1秒遅らせる")}</button></div>${["start","end"].map(field=>`<div><label>${field==="start"?"開始":"終了"}（秒）<input type="number" min="0" max="${project.duration}" step="0.01" data-field="${field}" value="${validTime(l[field])?l[field]:""}"></label><div class="buttons"><button data-action="adjust" data-field="${field}" data-delta="-.1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒早める">−0.1</button><button data-action="adjust" data-field="${field}" data-delta=".1" aria-label="${field==="start"?"開始":"終了"}だけ0.1秒遅らせる">＋0.1</button></div></div>`).join("")}<button data-action="listen" aria-label="${i+1}行目を聴く">${compact("listen","試聴","この行を聴く")}</button>${!placedIds.has(l.id)?`<button data-action="candidate" title="自動候補の少し手前へ移動" aria-label="${i+1}行目の自動候補付近へ移動" ${candidateSeekTime(l,project.duration)===null?"disabled":""}>${compact("next","候補へ","候補付近へ移動")}</button>`:""}<button data-action="confirm" aria-label="${i+1}行目を確認済みにする" ${!placedIds.has(l.id)?"disabled":""}>${compact("check","確認","確認済みにする")}</button></div>
     ${issues.filter(issue=>issue.index===i).map(issue=>`<p class="row-details quality-warning">${escape(issue.message)}</p>`).join("")}
-    <details class="row-details"><summary>照合用テキストと確認理由</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${candidateLabel(l.auto.candidateStart??l.auto.start)} → ${candidateLabel(l.auto.candidateEnd??l.auto.end)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):rowFilter==="review"&&project.lines.length?"<p class='hint'>要確認の行はありません。「すべて」で任意の行を修正できます。</p>":"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
+    <details class="row-details"><summary>${LOCAL?"詳細・確認理由":"照合用テキストと確認理由"}</summary><input type="text" aria-label="${i+1}行目の照合用テキスト" data-field="alignmentText" value="${escape(l.alignmentText)}"><p>${escape((l.reasons||[]).join(" "))}</p>${l.auto?`<p>自動候補 ${candidateLabel(l.auto.candidateStart??l.auto.start)} → ${candidateLabel(l.auto.candidateEnd??l.auto.end)} · 音声認識との照合文字 ${l.auto.evidence?.matchedCharacters??"—"}/${l.auto.evidence?.inputCharacters??"—"}（精度保証の数値ではありません）</p>`:""}</details></article>`).join(""):rowFilter==="review"&&project.lines.length?"<p class='hint'>要確認の行はありません。「すべて」で任意の行を修正できます。</p>":"<p class='hint'>歌詞を貼り付けて反映してください。</p>";
   refreshHistory();draw();
   document.body.classList.toggle("row-input-focus",Boolean(document.activeElement?.closest("#rows input")));
 }
@@ -187,9 +190,8 @@ function draw(){
   $("#seek").max=String(project.duration||1);$("#seek").value=String(current);
   $("#time").textContent=`${timeLabel(current)} / ${timeLabel(project.duration)}`;
   $("#edit-seek").max=String(project.duration||1);$("#edit-seek").value=String(current);$("#edit-time").textContent=$("#time").textContent;
-  $("#play").textContent=clock().paused?"▶ 再生":"Ⅱ 停止";
-  $("#edit-play").textContent=$("#play").textContent;
-  $("#fixed-play").textContent=clock().paused?"▶":"Ⅱ";
+  if(LOCAL){for(const id of ["play","edit-play","fixed-play"])setControl($("#"+id),clock().paused?"play":"pause",clock().paused?"再生":"停止",clock().paused?"素材を再生":"素材を一時停止");}
+  else{$("#play").textContent=clock().paused?"▶ 再生":"Ⅱ 停止";$("#edit-play").textContent=$("#play").textContent;$("#fixed-play").textContent=clock().paused?"▶":"Ⅱ";}
   $("#fixed-play").setAttribute("aria-label",clock().paused?"素材を再生":"素材を一時停止");
   $("#fixed-play").title=clock().paused?"素材を再生":"素材を一時停止";
 }
@@ -294,7 +296,7 @@ const openWork=safely(async e=>{const file=e.target.files[0];if(!file)return;try
 $("#project-file").onchange=$("#browser-project-file").onchange=openWork;
 const saveSrt=safely(()=>{if($("#lyrics").value!==project.lyrics)throw new Error("歌詞の入力欄に未反映の変更があります。先に「歌詞を反映」で確認してください。");const content=exportSrt(project,$("#srt-language").value);if(!content)throw new Error("確認済みの時刻を確認してください。");blobDownload(content,"lyrics.srt","application/x-subrip;charset=utf-8");message(`SRTを保存しました（確認済み ${cues(project,true).length}行）。要確認・未配置の行は含まれません。`);});
 $("#srt").onclick=saveSrt;$("#edit-srt").onclick=saveSrt;
-document.addEventListener("keydown",safely(e=>{if(e.target.closest("input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
+document.addEventListener("keydown",safely(e=>{if(e.defaultPrevented||document.querySelector("#editor-help")?.open||e.target.closest("input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
 video.addEventListener("seeking",()=>{if(project.assets.audio?.url&&Number.isFinite(audio.duration))audio.currentTime=Math.min(video.currentTime,audio.duration);});
 video.addEventListener("pause",()=>{if(project.assets.audio?.url)audio.pause();});
 video.addEventListener("timeupdate",()=>{if(project.assets.audio?.url&&!video.paused&&Number.isFinite(audio.duration)&&Math.abs(audio.currentTime-video.currentTime)>.1&&video.currentTime<audio.duration)audio.currentTime=video.currentTime;});
@@ -309,9 +311,9 @@ window.addEventListener("pagehide",e=>{returnPreview();if(!e.persisted)localMedi
 if(LOCAL){
   document.body.classList.add("browser-editor");
   document.title="Lyric SRT — 端末内編集 β";
-  $("header .tag").textContent="BROWSER EDITOR / BETA 0.3";
+  $("header .tag").textContent="端末内編集 β 0.3.1";
   $(".brand span").textContent="SRT EDITOR";
-  $(".intro h1").textContent="聴いて、少し直して、SRTへ。";
+  $(".intro h1").textContent="聴いて、SRTへ。";
   $(".intro>div>p:last-child").textContent="PCで同期したプロジェクトを引き継ぎ、スマホ・タブレット・PCのブラウザで仕上げます。";
   $(".privacy strong").textContent="音源と歌詞は、この端末の中で扱います。";
   $(".privacy p").textContent="素材は外部へ送信しません。PCへの接続も不要です。自動同期・MP4作成はこの画面にはありません。SRTは文字と時刻のファイルで、フォントなどの見た目は含みません。";
@@ -322,11 +324,16 @@ if(LOCAL){
   $("#font-note").replaceChildren(document.createTextNode("日本語・英語対応の同梱フォントでプレビューします。書体はプロジェクトへ保存されますが、SRTファイルには含まれません。 "),Object.assign(document.createElement("a"),{href:"fonts/README.md",textContent:"フォントとライセンス"}));
   $("#output .panel-title span").textContent="確認済みの行だけSRTへ";
   $("#output>p:last-child").textContent="プロジェクトJSONに素材本体は含まれません。別端末・再読み込み後は同じ素材を選び直してください。ブラウザの自動保存だけに頼らず、JSONも保存してください。";
-  $("footer").textContent="端末内編集 β 0.3。自動同期はPC版で実行してください。音源の再生形式、保存先や別窓の挙動は端末・ブラウザによって異なります。";
+  $("footer").textContent="端末内編集 β 0.3.1。自動同期はPC版で実行してください。音源の再生形式、保存先や別窓の挙動は端末・ブラウザによって異なります。";
   document.querySelectorAll("[data-server-only]").forEach(el=>{el.hidden=true;el.querySelectorAll("button,select,input").forEach(control=>control.disabled=true);});
   document.querySelectorAll("[data-browser-only]").forEach(el=>el.hidden=false);
   $("#align").hidden=$("#export").hidden=true;$("#align").disabled=$("#export").disabled=true;
-  message("PC版のプロジェクトJSONを開き、同じ音源を選んでください。歌詞を新規入力し、手動で開始・終了を記録することもできます。");
+  for(const [id,icon,label,description] of [["apply-lyrics","check","反映","入力した歌詞を一覧へ反映"],["record-start","start","開始","現在の再生位置を選択行の開始に記録"],["record-end","end","終了","現在の再生位置を選択行の終了に記録"],["edit-listen","listen","試聴","選択行を少し手前から聴く"],["srt","file","SRT保存","確認済み行のSRTを保存"],["edit-srt","file","SRT保存","確認済み行のSRTを保存"],["save-project","save","作業保存","続きを編集するプロジェクトJSONを保存"],["edit-save-project","save","作業保存","続きを編集するプロジェクトJSONを保存"],["filter-all","file","すべて","すべての歌詞行を表示"],["filter-review","edit","要確認","要確認の歌詞行だけ表示"],["next-review","next","次へ","次の要確認行へ移動"],["open-preview","popup","別窓","別窓プレビューを開く"],["edit-open-preview","popup","別窓","別窓プレビューを開く"],["return-preview","close","戻す","プレビューを画面内へ戻す"],["edit-return-preview","close","戻す","プレビューを画面内へ戻す"],["back","earlier","3秒","再生位置を3秒戻す"],["forward","later","3秒","再生位置を3秒進める"],["tab-production","folder","準備・保存","素材の準備と書き出し"],["tab-editing","edit","修正","歌詞のタイミング修正"]])setControl($("#"+id),icon,label,description);
+  const stepNames=[["folder","01 素材"],["listen","02 試聴"],["edit","03 修正"],["save","04 保存"]];
+  document.querySelectorAll(".steps a").forEach((link,i)=>{link.innerHTML=controlMarkup(...stepNames[i]);});
+  $("#prepare h2").textContent="01 素材と歌詞";$("#editing h2").textContent="03 修正";
+  installEditorGuides();
+  message("音源または作業ファイルを選んでください。");
 }
 render();
 prepareProjectFont().catch(error=>message(error.message,true));
