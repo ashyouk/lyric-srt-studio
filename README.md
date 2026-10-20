@@ -8,6 +8,8 @@
 
 `video/editor.html`（または `video/index.html?mode=browser`）は、音源の再生・タイミング修正・プロジェクト保存・SRT出力を端末内だけで行う編集画面です。静的ホスティングで利用でき、**Pythonサーバー、PCへの接続、音源アップロードは不要**です。GitHub Pages上の `video/` は自動的にこのモードになります。既存ルートのv2.3.3手動版と、ローカル `video/` のPC処理版は維持します。
 
+公開試験URL：**https://ashyouk.github.io/lyric-srt-studio/video/editor.html** 。既存の手動β版は従来のルートURLです。公開側へ追加したのは `video/` の静的ファイルだけで、PCの処理サーバーは公開していません。[検証結果・未確認項目](docs/BROWSER-EDITOR-VERIFICATION.md)
+
 1. PC版で自動同期後、「プロジェクトを保存」でJSONを保存します。
 2. JSONと同じ音源をスマホ／タブレットへ移し、端末内編集画面でJSONを開きます。
 3. 音源を選び直します。素材はBlob URLで再生され、外部送信されません。ファイル選択のaccept制限は付けません。
@@ -23,6 +25,8 @@
 - ローカル確認URL：`http://127.0.0.1:8765/video/editor.html`。これはPC上の確認用です。スマホでPC接続なしに試す場合は、別途静的ページを公開したURLを使用します。
 
 検証：`npm.cmd test`（既存テスト＋端末内素材管理）、`npm.cmd run test:browser-editor`（Python/APIなしの静的サーバーで、実WAV再生・修正・保存・SRT・画面幅・別窓を確認）。ブラウザテストの音源は `.studio-data/verification/twinkle-short.wav`、または `STUDIO_EDIT_AUDIO` で指定します。テスト用時刻はUI動作検証専用で、自動同期結果や精度評価としては扱いません。
+
+`STUDIO_BROWSER_EDITOR_URL` を上記サイトのルートURLへ設定すると公開静的ページを検証します。この場合、API宛て・GET/HEAD以外・他オリジンへのHTTP通信は検証ブラウザで遮断し、素材が意図せず送信されないようにします。
 
 `agent/lyric-video-prototype` ブランチの `video/` と `engine/` に、別画面の試作を追加しています。公開β版のHTML・CSS・JavaScriptは変更していません。販売完成版ではなく、実音源で同期・修正・音声付きMP4出力を検証する段階です。
 

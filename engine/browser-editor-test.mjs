@@ -20,7 +20,7 @@ const server=http.createServer(async(req,res)=>{
   try{const file=await stat(path);if(!file.isFile())throw new Error('not a file');res.writeHead(200,{'content-type':(types[extname(path)]||'application/octet-stream')+(extname(path)==='.ttf'?'':'; charset=utf-8'),'content-length':file.size});if(req.method==='HEAD')res.end();else createReadStream(path).pipe(res);}catch{res.writeHead(404);res.end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const base=`http://127.0.0.1:${server.address().port}${prefix}`,browser=await launchBrowser();
+const base=process.env.STUDIO_BROWSER_EDITOR_URL||`http://127.0.0.1:${server.address().port}${prefix}`,browser=await launchBrowser();
 const checks=[],errors=[];const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS '+name);};
 const audioPath=resolve(process.env.STUDIO_EDIT_AUDIO||'.studio-data/verification/twinkle-short.wav');
 const fixture=newProject('[Verse]\n日本語 Hello\n\n同じ歌詞\n同じ歌詞');fixture.duration=27;
@@ -29,6 +29,16 @@ fixture.assets.media={name:'PC reference',id:'old-server-id',url:'https://must-n
 const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
 const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
 let offOrigin=0;context.on('request',request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith(base))offOrigin++;});
+// An optional live static-host check is fail-closed: never send test media to an
+// API or another origin even if the hosted code unexpectedly regresses.
+if(process.env.STUDIO_BROWSER_EDITOR_URL)await context.route('**/*',route=>{
+  const request=route.request(),url=request.url();
+  if(!/^https?:/.test(url))return route.continue();
+  if(new URL(url).pathname.includes('/api/')){apiRequests++;return route.abort();}
+  if(!['GET','HEAD'].includes(request.method())){posts++;return route.abort();}
+  if(!url.startsWith(base)){offOrigin++;return route.abort();}
+  return route.continue();
+});
 async function download(button){const pending=page.waitForEvent('download');await page.locator(button).click();const file=await pending;assert.equal(await file.failure(),null);return {name:file.suggestedFilename(),text:await readFile(await file.path(),'utf8')};}
 try{
   await page.goto(base+'video/editor.html');await page.waitForFunction(()=>window.studio);
