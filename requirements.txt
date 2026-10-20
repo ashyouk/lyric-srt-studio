@@ -1,0 +1,12 @@
+# Local-only engine. No hosted inference SDK or API key is used.
+torch==2.14.1
+transformers==5.18.0
+accelerate==1.15.0
+soundfile==0.14.0
+librosa==1.0.0
+nagisa==0.3.0
+faster-whisper==1.2.1
+fastapi==0.142.2
+uvicorn==0.54.0
+python-multipart==0.0.32
+truststore==0.10.4

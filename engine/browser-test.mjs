@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import {readFile,mkdir,writeFile} from "node:fs/promises";
+import {resolve} from "node:path";
+import {launchBrowser} from "./browser.mjs";
+
+const base="http://127.0.0.1:8765", output=resolve(".studio-data/verification/browser");
+await mkdir(output,{recursive:true});
+const request=JSON.parse(await readFile(".studio-data/verification/full-request.json","utf8"));
+const lyrics=request.lines.map(l=>l.text).join("\n");
+const browser=await launchBrowser();
+const page=await browser.newPage({viewport:{width:1440,height:1100}});
+const errors=[];page.on("pageerror",e=>errors.push(e.message));
+const checks=[];
+const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);console.log("PASS "+name);};
+try {
+  await page.goto(base+"/video/");await page.waitForFunction(()=>window.studio);
+  await page.locator("#lyrics").fill(lyrics);
+  await page.locator("#media-file").setInputFiles(resolve(".studio-data/verification/twinkle-full.wav"));
+  await page.waitForFunction(()=>window.studio.snapshot().assets.media?.id);
+  await page.locator("#align").click();
+  await page.waitForFunction(()=>window.studio.snapshot().alignment,{},{timeout:240000});
+  const aligned=await page.evaluate(()=>window.studio.snapshot());
+  check("real audio alignment reached all canonical rows",aligned.lines.length===27&&aligned.lines.every(l=>l.auto));
+  check("canonical repeated lyrics preserved",aligned.lines.map(l=>l.text).join("\n")===lyrics);
+  check("alignment is acoustic and reviewable",aligned.alignment.engine.includes("Qwen")&&aligned.lines.every(l=>l.review));
+  check("all detected intervals are ordered and nonnegative",aligned.lines.every(l=>l.start!==null&&l.end>l.start&&l.end<=aligned.duration+.15));
+  await page.evaluate(()=>window.studio.seekTo(55));
+  await page.waitForFunction(()=>Math.abs(window.studio.currentTime()-55)<.05);
+  await page.locator("#play").click();await page.waitForTimeout(400);await page.locator("#play").click();
+  check("pause resumes media time without reset",await page.evaluate(()=>window.studio.currentTime()>55));
+  const firstStart=aligned.lines[0].start;
+  await page.locator("#tab-editing").click();
+  await page.locator('.lyric-row[data-id="line-0"] button[data-field="start"][data-delta=".1"]').click();
+  await page.locator('.lyric-row[data-id="line-0"] button[data-field="start"][data-delta=".1"]').click();
+  await page.locator("#fixed-undo").click();await page.locator("#fixed-undo").click();
+  check("two Undo operations restore actual auto timing",Math.abs((await page.evaluate(()=>window.studio.snapshot().lines[0].start))-firstStart)<.001);
+  await page.locator("#fixed-redo").click();await page.locator("#fixed-redo").click();
+  check("two Redo operations restore manual edits",Math.abs((await page.evaluate(()=>window.studio.snapshot().lines[0].start))-firstStart-.2)<.001);
+  // Restore the candidate for this export; manual preservation is tested independently.
+  await page.locator("#fixed-undo").click();await page.locator("#fixed-undo").click();
+  for(let i=0;i<27;i++) await page.locator(".lyric-row").nth(i).locator('[data-action="confirm"]').click();
+  const project=await page.evaluate(()=>window.studio.snapshot());
+  check("confirmed intervals feed export",project.lines.every(l=>!l.review));
+  await writeFile(resolve(output,"confirmed-project.json"),JSON.stringify(project,null,2));
+  await page.locator("#tab-production").click();
+  const savedEvent=page.waitForEvent("download");await page.locator("#save-project").click();
+  const saved=await savedEvent;await saved.saveAs(resolve(output,"saved-project.json"));
+  const savedJson=JSON.parse(await readFile(resolve(output,"saved-project.json"),"utf8"));
+  check("save retains text/timing and requests asset reselection",savedJson.lines[26].text===project.lines[26].text&&savedJson.assets.media.reselect&&!savedJson.assets.media.id);
+  const srtEvent=page.waitForEvent("download");await page.locator("#srt").click();
+  const srt=await srtEvent;await srt.saveAs(resolve(output,"lyrics.srt"));
+  check("real SRT contains repeated final line",(await readFile(resolve(output,"lyrics.srt"),"utf8")).includes("How I wonder what you are!"));
+  for(const [width,height] of [[390,844],[768,1024],[1024,768]]){
+    await page.setViewportSize({width,height});
+    check(`no page overflow at ${width}x${height}`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    check(`fixed recording controls visible at ${width}x${height}`,await page.locator("#record-start").isVisible());
+    await page.screenshot({path:resolve(output,`ui-${width}.png`),fullPage:true});
+  }
+  await page.setViewportSize({width:1440,height:1100});
+  check("browser has no uncaught errors",errors.length===0);
+  await page.locator("#export").click();
+  console.log("EXPORT full-song normal subtitles started");
+  await page.waitForFunction(()=>!document.querySelector("#download-video").hidden||document.querySelector("#message").classList.contains("error"),{},{timeout:900000});
+  check("full song MP4 completed",await page.locator("#download-video").isVisible());
+  const mp4Response=await page.request.get(new URL(await page.locator("#download-video").getAttribute("href"),base).href);
+  await writeFile(resolve(output,"twinkle-full-subtitles.mp4"),await mp4Response.body());
+  await page.locator("#project-file").setInputFiles(resolve(output,"saved-project.json"));
+  await page.waitForFunction(()=>!window.studio.snapshot().assets.media?.id);
+  check("project reload preserves timing without silently reusing media",(await page.evaluate(()=>window.studio.snapshot().lines[0].start))===project.lines[0].start);
+  check("browser remains free of errors after export and reload",errors.length===0);
+  await writeFile(resolve(output,"results.json"),JSON.stringify({checks,errors},null,2));
+  console.log(`COMPLETE ${checks.length} browser checks`);
+} finally {await browser.close();}
