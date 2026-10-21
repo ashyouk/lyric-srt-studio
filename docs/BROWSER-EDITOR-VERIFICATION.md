@@ -14,6 +14,8 @@
 
 公開確認：実装コミット `d4c82be`、公開コミット `8ebc032387a7b8d43f8c9c8c5ce571ae788c28fa`。Pagesが該当コミットのbuilt / error nullになり、公開URLでもChromiumタッチ環境の61項目すべて成功しました（API要求0・POST等0・他オリジン要求0・未処理エラー0）。更新したのは `video/auto.html`、`video/index.html`、`video/studio.css`、`video/studio.js` の4ファイルのみ。元のmainからvideo外に差分なし、root手動βはHTTP200／v2.3.3を保持。既存の無関係な未コミット `engine/test_align.py` はそのまま維持し、コミット対象外です。確認入口：`https://ashyouk.github.io/lyric-srt-studio/video/auto.html?v=0.4.2`。
 
+大きめのスマホ横画面も含める補足：実装 `08096ea` で短い横画面の境界を幅1024pxまで広げ、932×430・1024×500を追加しました。最終公開コミット `8d49f697a1b3f75ea14699a9765e815fe7187917` のPages built / error nullを確認後、公開URLでも全63項目成功（送信・外部要求・未処理エラー0）。標準タブレット縦横のsticky維持、長い歌詞の最終行選択、固定ボタンによる開始・終了記録と確認済みSRT保存も再確認しました。
+
 ## 0.4.1：iPhone音源選択の読込対策
 
 利用者報告はiPhone Safari、MP3またはWAV。「選択できるが反映されない」。元コードではメタデータが有効になるまで素材を登録せず、未接続の要素でloadedmetadataを待ち、初回イベントのdurationがNaN/Infinityの場合は直ちに失敗していました。エラーは選択欄付近になく、入力もリセットしていたため状態を確認しにくい構造でした。これらは確認した弱点であり、利用者実機の原因を断定するものではありません。
