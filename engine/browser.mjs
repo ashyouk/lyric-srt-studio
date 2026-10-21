@@ -1,6 +1,7 @@
-import {chromium} from "playwright";
+import {chromium,webkit} from "playwright";
 import {existsSync} from "node:fs";
 export async function launchBrowser() {
+  if(process.env.STUDIO_BROWSER_ENGINE==='webkit')return webkit.launch({headless:true});
   const options={headless:true};
   const candidates=[process.env.STUDIO_BROWSER,
     "C:/Program Files/Google/Chrome/Application/chrome.exe",

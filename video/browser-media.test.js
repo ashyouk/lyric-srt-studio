@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {BrowserMedia,attachBrowserAsset,mediaKind,isBrowserEditor} from "./browser-media.js";
+import {BrowserMedia,attachBrowserAsset,mediaKind,isBrowserEditor,playableBlob,wavDuration} from "./browser-media.js";
 import {newProject,saveProject,loadProject,History,shiftTiming,confirmLine,exportSrt} from "./core.js";
 
 test("browser runtime is explicit or GitHub Pages; local PC retains its engine",()=>{
@@ -16,6 +16,43 @@ test("iOS-style empty MIME uses extension without accept restrictions",()=>{
   assert.throws(()=>mediaKind({name:"archive.zip",type:"application/zip"}));
 });
 const file={name:"song.wav",type:"audio/wav",size:100,lastModified:123};
+function waveFile({format=1,truncated=false}={}){
+  const bytes=new Uint8Array(truncated?44:32044),view=new DataView(bytes.buffer);
+  for(const [offset,text] of [[0,'RIFF'],[8,'WAVE'],[12,'fmt '],[36,'data']])bytes.set(new TextEncoder().encode(text),offset);
+  view.setUint32(4,32036,true);view.setUint32(16,16,true);view.setUint16(20,format,true);view.setUint16(22,1,true);view.setUint32(24,16000,true);view.setUint32(28,32000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);view.setUint32(40,32000,true);
+  return new File([bytes],'song.WAV',{type:'application/octet-stream'});
+}
+test('PCM WAV duration is read from a bounded local header without media metadata events',async()=>{
+  const env=environment();env.document.createElement=()=>{throw new Error('No metadata probe needed');};
+  const asset=await new BrowserMedia(env).open(waveFile(),'media');
+  assert.equal(asset.duration,1);assert.equal(asset.durationSource,'wav-header');assert.equal(await wavDuration(waveFile()),1);
+});
+test('compressed or truncated WAV does not receive an invented duration',async()=>{
+  assert.equal(await wavDuration(waveFile({format:6})),null);assert.equal(await wavDuration(waveFile({truncated:true})),null);
+});
+test('empty and incorrect provider MIME is normalized without changing file bytes',async()=>{
+  const original=new File(['audio-data'],'song.m4a',{type:'video/mp4'}),normalized=playableBlob(original);
+  assert.equal(mediaKind(original),'audio');assert.equal(normalized.type,'audio/mp4');assert.equal(await normalized.text(),await original.text());
+});
+test('zero-byte cloud placeholder is rejected before creating any blob URL',async()=>{
+  const env=environment(),media=new BrowserMedia(env);await assert.rejects(media.open(new File([],'cloud.wav'),'media'),/ファイルが空/);assert.equal(media.urls.size,0);assert.equal(env.elements.length,0);
+});
+test('metadata probe is attached, waits through initial NaN, then cleans up on durationchange',async()=>{
+  let attached=false,removed=false;
+  const element={duration:NaN,style:{},setAttribute(){},pause(){},removeAttribute(){delete this.src;},remove(){removed=true;attached=false;},load(){if(!this.src)return;queueMicrotask(()=>{assert.equal(attached,true);this.onloadedmetadata?.();setTimeout(()=>{this.duration=9;this.ondurationchange?.();},1);});}};
+  const media=new BrowserMedia({document:{body:{append(){attached=true;}},createElement(){return element;}},url:{createObjectURL(){return 'blob:test';},revokeObjectURL(){}},timeoutMs:100});
+  const asset=await media.open({name:'song.mp3',type:'audio/mpeg',size:10},'media');assert.equal(asset.duration,9);assert.equal(removed,true);assert.equal(element.ondurationchange,null);assert.equal(element.src,undefined);
+});
+test('stalled audio metadata falls back to local decoding without playing media',async()=>{
+  const env=environment('timeout');let calls=0;
+  const media=new BrowserMedia({...env,timeoutMs:100,fallbackDelayMs:1,decodeDuration:async()=>{calls++;return 12;}});
+  const asset=await media.open({name:'song.mp3',type:'audio/mpeg',size:10},'media');
+  assert.equal(calls,1);assert.equal(asset.duration,12);assert.equal(asset.durationSource,'audio-decode');assert.equal(env.elements[0].src,undefined);
+});
+test('metadata plus decode failure rejects and releases only the newly selected asset',async()=>{
+  const env=environment('error'),media=new BrowserMedia({...env,timeoutMs:100,decodeDuration:async()=>{throw new Error('bad codec');}});
+  await assert.rejects(media.open(file,'media'),/音源を読み込めません/);assert.equal(env.revoked.length,1);assert.equal(media.urls.size,0);
+});
 function environment(outcome="success"){
   const revoked=[],elements=[];let count=0;
   const url={createObjectURL:()=>`blob:test-${++count}`,revokeObjectURL:value=>revoked.push(value)};

@@ -3,6 +3,7 @@ import http from 'node:http';
 import {createReadStream,existsSync} from 'node:fs';
 import {readFile,mkdir,stat} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {launchBrowser} from './browser.mjs';
 import {newProject} from '../video/core.js';
 
@@ -23,6 +24,9 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=process.env.STUDIO_BROWSER_EDITOR_URL||`http://127.0.0.1:${server.address().port}${prefix}`,browser=await launchBrowser();
 const checks=[],errors=[];const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS '+name);};
 const audioPath=resolve(process.env.STUDIO_EDIT_AUDIO||'.studio-data/verification/twinkle-short.wav');
+const pickerMp3=resolve(output,'picker-test.mp3'),pickerM4a=resolve(output,'picker-test.m4a');
+execFileSync('ffmpeg',['-v','error','-y','-i',audioPath,'-t','3','-c:a','libmp3lame',pickerMp3]);
+execFileSync('ffmpeg',['-v','error','-y','-i',audioPath,'-t','3','-c:a','aac',pickerM4a]);
 const fixture=newProject('[Verse]\n日本語 Hello\n\n同じ歌詞\n同じ歌詞');fixture.duration=27;
 fixture.lines.forEach((line,i)=>Object.assign(line,{start:1+i*5,end:3+i*5,auto:{candidateStart:1+i*5,candidateEnd:3+i*5,evidence:{matchedCharacters:3}},reasons:['検証用の時刻。同期精度の評価には使いません。']}));
 fixture.assets.media={name:'PC reference',id:'old-server-id',url:'https://must-not-fetch.invalid/audio.wav',kind:'audio',duration:27};
@@ -54,6 +58,7 @@ try{
   await page.locator('#editor-help-open').click();
   check('help dialog opens with illustrated instructions',await page.locator('#editor-help').isVisible()&&await page.locator('#editor-help .ui-icon').count()>3);
   await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>!document.querySelector('#editor-help').open&&document.activeElement.id==='editor-help-open');
   check('help closes and restores focus without changing project',await page.evaluate(expected=>!document.querySelector('#editor-help').open&&document.activeElement.id==='editor-help-open'&&JSON.stringify(studio.snapshot())===expected,initial));
   check('compact controls retain visible labels and accessible names',await page.evaluate(()=>['play','record-start','fixed-undo','save-project'].every(id=>{const b=document.getElementById(id);return b.querySelector('.ui-icon')&&b.querySelector('.control-label')?.textContent&&b.getAttribute('aria-label');})));
   await page.locator('#record-start').click();
@@ -65,6 +70,20 @@ try{
   await page.locator('#media-file').setInputFiles(audioPath);
   await page.waitForFunction(()=>studio.snapshot().assets.media?.source==='browser-file'&&document.querySelector('#audio').readyState>=1);
   check('real WAV metadata loads through a local blob, not a server upload',await page.evaluate(()=>studio.snapshot().assets.media.url.startsWith('blob:')&&studio.snapshot().duration>20&&studio.snapshot().lines[0].start===1));
+  check('WAV duration bypasses metadata preload and selection feedback is near the picker',await page.evaluate(()=>studio.snapshot().assets.media.durationSource==='wav-header'&&document.querySelector('#media-load-status').textContent.includes('選択しました')&&document.querySelector('#media-file').getAttribute('aria-busy')==='false'));
+  for(const [name,mimeType,path] of [['ios-picker.MP3','',pickerMp3],['ios-picker.m4a','video/mp4',pickerM4a]]){
+    await page.locator('#media-file').setInputFiles({name,mimeType,buffer:await readFile(path)});
+    await page.waitForFunction(name=>studio.snapshot().assets.media?.name===name&&document.querySelector('#audio').readyState>=1,name);
+    await page.locator('#play').click();await page.waitForFunction(()=>studio.currentTime()>.05);await page.locator('#play').click();
+    check(`${name} with provider MIME opens and actually plays`,await page.evaluate(()=>studio.inspection().paused&&studio.currentTime()>.05));
+  }
+  const beforeBad=await page.evaluate(()=>JSON.stringify(studio.snapshot()));
+  await page.locator('#media-file').setInputFiles({name:'broken.mp3',mimeType:'audio/mpeg',buffer:Buffer.from('not audio')});
+  await page.waitForFunction(()=>document.querySelector('#media-load-status').classList.contains('error'));
+  check('invalid audio reports beside picker without replacing current media or lyrics',await page.evaluate(expected=>JSON.stringify(studio.snapshot())===expected&&document.querySelector('#media-load-status').textContent.includes('broken.mp3'),beforeBad));
+  await page.locator('#media-file').setInputFiles({name:'cloud.wav',mimeType:'audio/wav',buffer:Buffer.alloc(0)});
+  check('empty cloud file shows actionable message and preserves current work',await page.evaluate(expected=>JSON.stringify(studio.snapshot())===expected&&document.querySelector('#media-load-status').textContent.includes('ファイルが空'),beforeBad));
+  await page.locator('#media-file').setInputFiles(audioPath);await page.waitForFunction(()=>studio.snapshot().duration>20&&document.querySelector('#audio').readyState>=1);
   const beforeHelp=await page.evaluate(()=>({project:JSON.stringify(studio.snapshot()),past:studio.inspection().past}));
   await page.locator('#editor-help-open').click();await page.keyboard.press('e');await page.keyboard.press('Space');await page.locator('#editor-help-close').click();
   check('help prevents editing shortcuts from modifying project or history',await page.evaluate(expected=>JSON.stringify(studio.snapshot())===expected.project&&studio.inspection().past===expected.past,beforeHelp));
@@ -127,4 +146,5 @@ try{
   check('browser editor never calls API, posts files or contacts remote asset URLs',apiRequests===0&&posts===0&&offOrigin===0);
   check('no uncaught browser errors',errors.length===0);
   console.log(JSON.stringify({checks:checks.length,apiRequests,posts,offOrigin,realAudio:true,newAlignment:false,physicalIOS:false}));
+}catch(error){console.log('DIAGNOSTIC '+JSON.stringify(await page.evaluate(()=>({media:window.studio?.snapshot().assets.media,audio:{src:document.querySelector('#audio').getAttribute('src'),readyState:document.querySelector('#audio').readyState,error:document.querySelector('#audio').error?.message},status:document.querySelector('#media-load-status')?.textContent,wav:document.createElement('audio').canPlayType('audio/wav'),mp3:document.createElement('audio').canPlayType('audio/mpeg')}))));throw error;
 }finally{await context.close();await browser.close();await new Promise(resolve=>server.close(resolve));}

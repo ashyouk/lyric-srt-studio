@@ -3,7 +3,7 @@ import {newProject,loadProject,saveProject,updateLyrics,applyAlignment,editTimin
 import {FONTS,normalizeFont} from "./font-catalog.js";
 import {ensureFont} from "./fonts.js";
 import {drawComposite} from "./preview-render.js";
-import {BrowserMedia,attachBrowserAsset,isBrowserEditor} from "./browser-media.js";
+import {BrowserMedia,attachBrowserAsset,isBrowserEditor} from "./browser-media.js?v=0.4.1";
 import {controlMarkup,setControl,installEditorGuides} from "./editor-ui.js?v=0.3.1";
 
 const $=selector=>document.querySelector(selector);
@@ -84,7 +84,7 @@ function seekCandidate(id){
   selectRow(id,false);seekTo(target);
   message("自動候補の0.5秒手前（曲頭では0秒）へ移動しました。時刻は未確定です。聴いて「開始を記録」「終了を記録」で修正してください。");
 }
-function unload(){video.pause();audio.pause();[video,audio].forEach(el=>{el.removeAttribute("src");el.load();});$("#background").removeAttribute("src");$("#background").hidden=true;}
+function unload(){video.pause();audio.pause();[video,audio].forEach(el=>{el.removeAttribute("src");el.load();});$("#background").removeAttribute("src");$("#background").hidden=true;for(const kind of ['media','audio','background']){const status=$(`#${kind}-load-status`);if(status){status.textContent='';status.classList.remove('error');}$(`#${kind}-file`).setAttribute('aria-busy','false');}}
 function attachMedia(){
   video.pause();audio.pause();
   const main=project.assets.media, separate=project.assets.audio;
@@ -98,16 +98,24 @@ function attachMedia(){
   $("#media-name").textContent=main?`${main.name} · ${timeLabel(project.duration)}${main.reselect?"（再選択してください）":""}`:"素材が未選択です。";
   $("#background-name").textContent=background?.name||"";
 }
+function uploadStatus(kind,text,error=false){
+  let status=$(`#${kind}-load-status`);
+  if(!status){status=document.createElement('p');status.id=`${kind}-load-status`;status.className='hint local-message';status.setAttribute('role','status');status.setAttribute('aria-live','polite');$(`#${kind}-file`).parentElement.after(status);}
+  status.textContent=text;status.classList.toggle('error',error);
+}
 async function upload(file,kind){
   if(!file) return;
   if(LOCAL){
     const request=++localRequests[kind];
+    uploadStatus(kind,`${file.name} · ${file.type||'形式を確認中'} · ${(file.size/1024/1024).toFixed(1)}MB — 読み込み中…`);
+    $(`#${kind}-file`).setAttribute('aria-busy','true');
     message(`${file.name}を端末内で開いています。外部へ送信しません。`);
     const previous=project.assets[kind];
     let asset;
-    try{asset=await localMedia.open(file,kind);}catch(error){if(request!==localRequests[kind])return;throw error;}
+    try{asset=await localMedia.open(file,kind);}catch(error){if(request!==localRequests[kind])return;uploadStatus(kind,`${file.name}：${error.message}`,true);throw error;}finally{if(request===localRequests[kind])$(`#${kind}-file`).setAttribute('aria-busy','false');}
     if(request!==localRequests[kind]){localMedia.release(asset);return;}
     commit(attachBrowserAsset(project,asset,kind));attachMedia();
+    uploadStatus(kind,`${file.name} を選択しました${asset.kind==='image'?'':`（${timeLabel(asset.duration)}）`}。再生ボタンで確認できます。`);
     const changed=previous&&(previous.name!==asset.name||Math.abs((previous.duration||0)-asset.duration)>.5);
     message(`素材を端末内で開きました。${changed?"以前と異なる素材の可能性があります。時刻は保持しているので、曲が合っているか確認してください。":""}${asset.kind==="video"?"動画が無音の場合は別音源を選択してください。":""}`);
     return;
@@ -334,8 +342,8 @@ document.addEventListener("keydown",safely(e=>{if(e.defaultPrevented||document.q
 video.addEventListener("seeking",()=>{if(project.assets.audio?.url&&Number.isFinite(audio.duration))audio.currentTime=Math.min(video.currentTime,audio.duration);});
 video.addEventListener("pause",()=>{if(project.assets.audio?.url)audio.pause();});
 video.addEventListener("timeupdate",()=>{if(project.assets.audio?.url&&!video.paused&&Number.isFinite(audio.duration)&&Math.abs(audio.currentTime-video.currentTime)>.1&&video.currentTime<audio.duration)audio.currentTime=video.currentTime;});
-video.addEventListener("error",()=>{if(video.getAttribute("src"))message("このブラウザでは動画をプレビューできません。H.264のMP4で確認してください。",true);});
-audio.addEventListener("error",()=>{if(audio.getAttribute("src"))message("音源を再生できません。WAVなど別形式を確認してください。",true);});
+video.addEventListener("error",()=>{if(video.getAttribute("src")){const text="このブラウザでは動画をプレビューできません。H.264のMP4で確認してください。";message(text,true);if(LOCAL)uploadStatus('media',text,true);}});
+audio.addEventListener("error",()=>{if(audio.getAttribute("src")){const text="音源を再生できません。ファイルが端末に保存済みか確認し、MP3・M4A・PCM形式のWAVなどで試してください。";message(text,true);if(LOCAL)uploadStatus(project.assets.media?.kind==='video'?'audio':'media',text,true);}});
 try{const saved=JSON.parse(localStorage.getItem(STORAGE));if(saved)project=loadProject(saved);}catch{}
 $("#lyrics").value=project.lyrics;attachMedia();setStyleInputs();
 // Available before the initial font wait, including a popup opened immediately.
@@ -370,7 +378,7 @@ if(LOCAL){
   message("音源または作業ファイルを選んでください。");
 }
 if(AUTO){
-  $('header .tag').textContent='端末内自動同期 実験 0.4.0';
+  $('header .tag').textContent='端末内自動同期 実験 0.4.1';
   $('.intro h1').textContent='音源と歌詞から、SRTへ。';
   $('.intro>div>p:last-child').textContent='PC接続なし・月額サービスなしの端末内解析を検証中です。候補を聴いて確認してからSRTへ保存します。';
   $('.privacy p').textContent='音源・歌詞はこの端末内で処理します。実行時にHugging Faceからモデルを取得しますが、音源や歌詞は送信しません。初回は通信量と空き容量が必要です。';
@@ -385,7 +393,7 @@ if(AUTO){
   $('#align').hidden=false;$('#align').disabled=false;$('#align').onclick=safely(runBrowserSync);setControl($('#align'),'listen','自動同期','音源と入力歌詞をこの端末内で自動照合する');
   const help=$('#editor-help');help.querySelector('.help-steps li:first-child p').textContent='音源を選び、正しい歌詞を貼り付けます。初回モデル取得に同意し「自動同期」を押してください。保存したJSONから続けることもできます。';
   help.querySelector('details:last-child p').textContent='この実験画面では端末内で自動同期・時刻修正・SRT保存を行います。認識結果は本文を置き換えません。自動候補はすべて要確認です。MP4作成は行いません。モデル取得時は通信しますが、音源・歌詞は外部送信しません。';
-  $('footer').textContent='端末内自動同期 実験0.4.0。スマホ実機は未検証です。自動候補を聴いて確認し、作業JSONも保存してください。';
+  $('footer').textContent='端末内自動同期 実験0.4.1。スマホ実機は未検証です。自動候補を聴いて確認し、作業JSONも保存してください。';
   message('音源と歌詞を選び、まず30秒で試してください。自動候補は必ず確認が必要です。');
 }
 render();
