@@ -143,6 +143,11 @@ try{
     await page.waitForFunction(()=>document.querySelector('#audio').readyState>=1&&studio.snapshot().duration>100);
     check('actual-song WAV opens locally without changing imported timings',await page.evaluate(expected=>studio.snapshot().lines.every((line,i)=>line.start===expected[i].start&&line.end===expected[i].end),actual.lines));
   }
+  await page.goto(base+'video/auto.html');await page.waitForFunction(()=>window.studio);
+  check('auto-sync experiment serves media-loading patch version',await page.locator('header .tag').textContent().then(t=>t.includes('0.4.1')));
+  await page.locator('#media-file').setInputFiles(audioPath);await page.waitForFunction(()=>studio.snapshot().assets.media?.url?.startsWith('blob:')&&document.querySelector('#audio').readyState>=1);
+  await page.locator('#play').click();await page.waitForFunction(()=>studio.currentTime()>.05);await page.locator('#play').click();
+  check('experimental entry also selects and plays local WAV with inline status',await page.evaluate(()=>studio.inspection().paused&&document.querySelector('#media-load-status').textContent.includes('選択しました')&&!document.querySelector('#media-load-status').classList.contains('error')));
   check('browser editor never calls API, posts files or contacts remote asset URLs',apiRequests===0&&posts===0&&offOrigin===0);
   check('no uncaught browser errors',errors.length===0);
   console.log(JSON.stringify({checks:checks.length,apiRequests,posts,offOrigin,realAudio:true,newAlignment:false,physicalIOS:false}));

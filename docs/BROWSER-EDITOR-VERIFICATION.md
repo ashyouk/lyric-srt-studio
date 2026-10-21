@@ -10,6 +10,8 @@
 
 Windows向けPlaywright WebKit 26.6でも追加確認を試しましたが、この環境ではWAVのBlob/data URL再生が成立せず、全体試験は完了していません。iPhone Safariの成功・失敗の証拠としては扱いません。利用者の実機による再試行と、残る場合のファイル直下のエラー文確認が必要です。Appleの古い資料の「preload不可」を現在のSafari全般の仕様として断定していません。
 
+公開コミット `bf06b847214bac3b9fcad143a1f96c03c111fa7e` のPages built / error nullを確認。公開URLのChromiumで45項目成功（通常編集＋実験入口の0.4.1表示・WAV選択／実再生を含む）、API要求0・POST等0・他オリジン要求0・未処理エラー0。root手動βはHTTP200／v2.3.3を保持。変更実装 `00c1a6d`。ブラウザテストは既存FFmpegを用いて検証用MP3/M4Aを `.studio-data/` に生成し、音源を送信せずファイル入力で試す。モデル再解析・MP4生成は今回行っていません。
+
 ## 端末内自動同期 実験0.4.0（2026-10-21）
 
 通常編集版とは別の `video/auto.html` から入ります。音声API・PC解析サーバーは使いません。同梱Transformers.js 3.8.1 / ONNX Runtime Webで、量子化した多言語Whisper tiny_timestampedをWASM単一スレッドで実行します。モデルの固定リビジョンは `video/browser-alignment.js`。通常編集モードはモデルも解析ランタイムも読み込みません。
