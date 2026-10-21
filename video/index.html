@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lyric Video Studio — 開発試作</title><link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="studio.css?v=0.4.1"></head>
+<title>Lyric Video Studio — 開発試作</title><link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="studio.css?v=0.4.2"></head>
 <body>
 <header><a class="brand" href="./">LYRIC <span>VIDEO STUDIO</span></a><span class="tag">LOCAL PC / PROTOTYPE 0.2</span><a href="../">手動SRT版</a></header>
 <main>
@@ -43,11 +43,11 @@
 <section id="editing-panel" role="tabpanel" aria-labelledby="tab-editing" hidden>
 <section id="editing" class="panel"><div class="panel-title"><h2>03 聴いて、必要な行だけ修正</h2><span id="review-count">0行</span></div>
 <div class="edit-workspace"><div class="edit-monitor"><div class="stage compact-stage"><canvas id="edit-canvas" width="1920" height="1080" aria-label="修正用コンパクトプレビュー"></canvas></div><p id="edit-selected" class="target-label">選択行：未選択</p><p id="edit-playing" class="hint">再生中の歌詞行：なし</p><input id="edit-seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="修正画面の再生位置"><div class="transport"><button id="edit-play">▶ 再生</button><button id="edit-listen">この行を聴く</button><output id="edit-time">00:00.000</output></div><div class="buttons"><button id="edit-open-preview">別窓で開く</button><button id="edit-return-preview" hidden>画面内に戻す</button></div><p id="edit-message" class="hint local-message"></p><p class="hint edit-help">行番号で開始の0.5秒手前へ移動。「この行を聴く」で試聴。行全体の±0.1秒は表示時間を保ちます。</p></div>
-<div class="edit-list"><div class="buttons"><button id="filter-all" aria-pressed="true">すべて</button><button id="filter-review" aria-pressed="false">要確認</button><button id="next-review">次の要確認行</button><button id="undo" disabled>↶ 戻る</button><button id="redo" disabled>↷ やり直す</button></div><div class="buttons" data-browser-only hidden><button id="edit-save-project">作業を保存（JSON）</button><button id="edit-srt">確認済み行のSRTを保存</button></div><p id="quality-count" class="hint"></p><div id="rows" class="rows"><p class="hint">素材と歌詞を選ぶと、ここで時刻を確認・修正できます。</p></div></div></div>
+<div class="edit-list"><div class="buttons"><button id="filter-all" aria-pressed="true">すべて</button><button id="filter-review" aria-pressed="false">要確認</button><button id="next-review">次の要確認行</button><button id="undo" disabled>↶ 戻る</button><button id="redo" disabled>↷ やり直す</button></div><div class="buttons" data-browser-only hidden><button id="edit-save-project">作業を保存（JSON）</button><button id="edit-srt">確認済み行のSRTを保存</button></div><p id="alignment-summary" class="alignment-summary" role="status" hidden></p><p id="quality-count" class="hint"></p><div id="rows" class="rows"><p class="hint">素材と歌詞を選ぶと、ここで時刻を確認・修正できます。</p></div></div></div>
 </section></section>
 <section class="panel job-panel" id="job-panel" hidden><strong id="job-status" role="status"></strong><progress id="job-progress" hidden></progress><button id="cancel" type="button">処理をキャンセル</button><a id="download-video" hidden>MP4を保存</a></section>
 <p id="message" class="message" role="status" aria-live="polite">素材を選んで、歌詞を貼り付けてください。</p>
 <footer>開発試作です。歌唱の精度を保証する販売版ではありません。 <a href="../">v2.3.3 手動SRT版へ</a></footer>
 </main>
-<aside class="floating" aria-label="固定編集操作"><div><small>選択行 <span id="playing-line">/ 再生中：なし</span></small><strong id="active-text">歌詞が未入力です</strong></div><button id="fixed-play">▶</button><button id="fixed-undo" disabled title="元に戻す" aria-label="元に戻す">↶</button><button id="fixed-redo" disabled title="やり直す" aria-label="やり直す">↷</button><button id="record-start" class="primary">開始を記録</button><button id="record-end">終了を記録</button></aside>
-<script type="module" src="studio.js?v=0.4.1"></script></body></html>
+<aside class="floating" aria-label="固定編集操作"><div><small>選択行 <span id="playing-line">/ 再生中：なし</span></small><strong id="active-text">歌詞が未入力です</strong><p id="console-message" class="console-feedback" role="status" aria-live="polite" hidden></p></div><button id="fixed-play">▶</button><button id="fixed-undo" disabled title="元に戻す" aria-label="元に戻す">↶</button><button id="fixed-redo" disabled title="やり直す" aria-label="やり直す">↷</button><button id="record-start" class="primary">開始を記録</button><button id="record-end">終了を記録</button></aside>
+<script type="module" src="studio.js?v=0.4.2"></script></body></html>

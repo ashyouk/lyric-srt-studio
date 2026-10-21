@@ -60,6 +60,11 @@ try{
     await page.locator('#align').click();await page.waitForFunction(()=>!document.querySelector('#align').disabled,{},{timeout:300000});
     const project=await page.evaluate(()=>studio.snapshot());await writeFile(resolve(out,'yellow-tape-browser.json'),JSON.stringify(project,null,2));
     check('Japanese full-song run uses browser engine and preserves supplied lyrics',project.alignment?.engine==='browser-whisper-tiny-q8-word-blocks'&&project.lyrics===actual.lyrics);
+    if(project.lines.every(l=>l.start===null)){
+      check('real zero-candidate run stays on production and reports failure beside fixed controls',await page.evaluate(()=>studio.inspection().activeTab==='production'&&!document.querySelector('#console-message').hidden&&document.querySelector('#console-message').textContent.includes('SRTはまだ作成できていません')));
+      await page.locator('#tab-editing').click();
+      check('real zero-candidate result keeps an explicit warning in editing',await page.locator('#alignment-summary').isVisible()&&await page.locator('#alignment-summary').textContent().then(t=>t.includes('有効な時刻を得られませんでした')));
+    }
     console.log(JSON.stringify({song:'provided Japanese song',rows:project.lines.length,placed:project.lines.filter(l=>l.start!==null).length,seconds:project.alignment?.elapsedSeconds,humanBoundaryAccuracy:'not measured'}));
     await page.setViewportSize({width:390,height:844});await page.screenshot({path:resolve(out,'editing-390.png')});
   }

@@ -144,10 +144,50 @@ try{
     check('actual-song WAV opens locally without changing imported timings',await page.evaluate(expected=>studio.snapshot().lines.every((line,i)=>line.start===expected[i].start&&line.end===expected[i].end),actual.lines));
   }
   await page.goto(base+'video/auto.html');await page.waitForFunction(()=>window.studio);
-  check('auto-sync experiment serves media-loading patch version',await page.locator('header .tag').textContent().then(t=>t.includes('0.4.1')));
+  check('auto-sync experiment serves mobile-editing patch version',await page.locator('header .tag').textContent().then(t=>t.includes('0.4.2')));
   await page.locator('#media-file').setInputFiles(audioPath);await page.waitForFunction(()=>studio.snapshot().assets.media?.url?.startsWith('blob:')&&document.querySelector('#audio').readyState>=1);
   await page.locator('#play').click();await page.waitForFunction(()=>studio.currentTime()>.05);await page.locator('#play').click();
   check('experimental entry also selects and plays local WAV with inline status',await page.evaluate(()=>studio.inspection().paused&&document.querySelector('#media-load-status').textContent.includes('選択しました')&&!document.querySelector('#media-load-status').classList.contains('error')));
+  // UI fixtures below have no model-generated timestamps: test real manual
+  // capture/touch interactions, not automatic synchronization accuracy.
+  await page.locator('#browser-project-file').setInputFiles({name:'empty.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(newProject('')))});
+  await page.locator('#media-file').setInputFiles(audioPath);await page.waitForFunction(()=>document.querySelector('#audio').readyState>=1);
+  await page.locator('#record-start').tap();
+  check('missing lyrics reports at the fixed console instead of silently doing nothing',await page.locator('#console-message').isVisible()&&await page.locator('#console-message').textContent().then(t=>t.includes('反映')));
+  await page.locator('#lyrics').fill(Array.from({length:40},(_,i)=>`長い歌詞の確認 ${i+1}行目`).join('\n'));
+  await page.locator('#record-start').tap();
+  check('unapplied lyrics cannot capture a stale selected row',await page.locator('#console-message').textContent().then(t=>t.includes('未反映'))&&await page.evaluate(()=>studio.snapshot().lines.length===0));
+  await page.locator('#apply-lyrics').click();await page.locator('#tab-editing').click();
+  const last=page.locator('.lyric-row').last();
+  check('unplaced rows distinguish unavailable fine adjustment from available selection',await last.locator('[data-action="shift"]').first().isDisabled()&&await last.locator('[data-action="adjust"]').first().isDisabled()&&await last.locator('[data-action="listen"]').isDisabled()&&await last.locator('[data-action="select"]').isEnabled()&&await last.locator('.empty-timing-hint').count()===1);
+  for(const [width,height] of [[320,740],[390,844],[844,390]]){
+    await page.setViewportSize({width,height});await last.locator('[data-action="select"]').tap();
+    check(`phone preview scrolls away and last-row touch reaches selection at ${width}x${height}`,await page.evaluate(()=>{const p=studio.snapshot();return getComputedStyle(document.querySelector('.edit-monitor')).position==='static'&&document.querySelector('.edit-monitor').getBoundingClientRect().bottom<0&&studio.inspection().selected===p.lines.at(-1).id;}));
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(()=>studio.seekTo(1.25));await page.locator('#record-start').tap();
+  check('touch captures start on a scrolled last row and immediately enables edge adjustment',await page.evaluate(()=>studio.snapshot().lines.at(-1).start===1.25&&studio.snapshot().lines.at(-1).manual.start)&&await last.locator('[data-field="start"][data-action="adjust"]').first().isEnabled()&&await page.locator('#console-message').textContent().then(t=>t.includes('40行目の開始')));
+  await page.evaluate(()=>studio.seekTo(2.75));await page.locator('#record-end').tap();
+  check('touch captures end without changing selection or playback position',await page.evaluate(()=>{const p=studio.snapshot();return p.lines.at(-1).end===2.75&&p.lines.at(-1).manual.end&&studio.currentTime()===2.75&&studio.inspection().selected===p.lines.at(-1).id;}));
+  await last.locator('[data-action="shift"][data-delta=".1"]').tap();
+  check('newly recorded row can shift as a whole with preserved duration',await page.evaluate(()=>{const l=studio.snapshot().lines.at(-1);return l.start===1.35&&l.end===2.85&&Math.abs(l.end-l.start-1.5)<1e-9;}));
+  await page.locator('#fixed-undo').tap();await page.locator('#fixed-undo').tap();
+  check('multiple touch Undo restores partial capture',await page.evaluate(()=>{const l=studio.snapshot().lines.at(-1);return l.start===1.25&&l.end===null;}));
+  await page.locator('#fixed-redo').tap();await page.locator('#fixed-redo').tap();
+  check('multiple touch Redo restores complete timing and active controls',await last.locator('[data-action="confirm"]').isEnabled()&&await page.evaluate(()=>studio.snapshot().lines.at(-1).end===2.85));
+  await last.locator('[data-action="confirm"]').tap();
+  const capturedSrt=await download('#edit-srt');
+  check('manual touch capture through confirmation exports real SRT',capturedSrt.text.includes('00:00:01,350 --> 00:00:02,850')&&capturedSrt.text.includes('長い歌詞の確認 40行目'));
+  for(const [width,height] of [[768,1024],[1024,768],[1365,900]]){
+    await page.setViewportSize({width,height});
+    check(`tablet/desktop preview keeps existing sticky behavior at ${width}`,await page.locator('.edit-monitor').evaluate(el=>getComputedStyle(el).position==='sticky'));
+  }
+  const unmatched=newProject('自動未配置の行\n繰り返し\n繰り返し');unmatched.duration=27;unmatched.alignment={engine:'ui-zero-result-fixture',elapsedSeconds:0};
+  await page.locator('#tab-production').click();await page.locator('#browser-project-file').setInputFiles({name:'zero-result-ui-only.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(unmatched))});
+  await page.locator('#tab-editing').click();await page.setViewportSize({width:390,height:844});
+  check('zero-candidate result explicitly says SRT has not been automatically created',await page.locator('#alignment-summary').isVisible()&&await page.locator('#alignment-summary').textContent().then(t=>t.includes('SRTはまだ自動作成できていません')));
+  await page.locator('.lyric-row').last().locator('[data-action="select"]').tap();
+  await page.screenshot({path:resolve(output,'editing-phone-no-sticky.png')});
   check('browser editor never calls API, posts files or contacts remote asset URLs',apiRequests===0&&posts===0&&offOrigin===0);
   check('no uncaught browser errors',errors.length===0);
   console.log(JSON.stringify({checks:checks.length,apiRequests,posts,offOrigin,realAudio:true,newAlignment:false,physicalIOS:false}));
