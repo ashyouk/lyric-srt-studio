@@ -160,7 +160,7 @@ try{
   await page.locator('#apply-lyrics').click();await page.locator('#tab-editing').click();
   const last=page.locator('.lyric-row').last();
   check('unplaced rows distinguish unavailable fine adjustment from available selection',await last.locator('[data-action="shift"]').first().isDisabled()&&await last.locator('[data-action="adjust"]').first().isDisabled()&&await last.locator('[data-action="listen"]').isDisabled()&&await last.locator('[data-action="select"]').isEnabled()&&await last.locator('.empty-timing-hint').count()===1);
-  for(const [width,height] of [[320,740],[390,844],[844,390]]){
+  for(const [width,height] of [[320,740],[390,844],[844,390],[932,430],[1024,500]]){
     await page.setViewportSize({width,height});await last.locator('[data-action="select"]').tap();
     check(`phone preview scrolls away and last-row touch reaches selection at ${width}x${height}`,await page.evaluate(()=>{const p=studio.snapshot();return getComputedStyle(document.querySelector('.edit-monitor')).position==='static'&&document.querySelector('.edit-monitor').getBoundingClientRect().bottom<0&&studio.inspection().selected===p.lines.at(-1).id;}));
   }
