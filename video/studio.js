@@ -8,6 +8,8 @@ import {controlMarkup,setControl,installEditorGuides} from "./editor-ui.js?v=0.3
 
 const $=selector=>document.querySelector(selector);
 const LOCAL=isBrowserEditor(location.href);
+const AUTO=LOCAL&&new URL(location.href).searchParams.get('sync')==='local';
+let browserSync=null,syncGeneration=0;
 const compact=(icon,short,long)=>LOCAL?controlMarkup(icon,short):long;
 const localMedia=LOCAL?new BrowserMedia():null;
 const localRequests={media:0,audio:0,background:0};
@@ -236,10 +238,42 @@ async function runJob(kind){
   } finally {busy=false;jobId=null;$("#align").disabled=false;$("#export").disabled=false;$("#cancel").hidden=true;}
 }
 
+async function runBrowserSync(){
+  if(!AUTO)return;
+  if(busy)throw new Error('処理中です。完了または中止をお待ちください。');
+  if(!$('#model-consent').checked)throw new Error('初回のモデル取得と、実験版の注意事項をご確認ください。');
+  applyLyrics();
+  if($('#lyrics').value!==project.lyrics)throw new Error('歌詞の変更を反映してから再試行してください。');
+  const asset=project.assets.audio||project.assets.media;
+  if(!asset?.url?.startsWith('blob:'))throw new Error('この端末から音源を選択してください。');
+  if(asset.kind!=='audio')throw new Error('この実験版の自動同期は音源のみです。WAV・MP3・M4Aで試してください。');
+  if(project.lines.some(l=>l.start!==null&&!l.manual.start&&!l.manual.end)&&!window.confirm('自動候補を作り直します。手動修正した行は保護しますが、それ以外の自動時刻は置き換わります。冒頭30秒の解析では範囲外の行が未配置になる場合があります。先に作業保存しておくことをおすすめします。実行しますか？'))return;
+  const sourceKey=()=>`${project.assets.media?.id}/${project.assets.audio?.id}`;
+  const initialKey=sourceKey(),initialSignature=signature(),generation=++syncGeneration;
+  busy=true;$('#align').disabled=true;$('#job-panel').hidden=false;$('#cancel').hidden=false;$('#job-progress').hidden=true;
+  const stage=text=>{$('#job-status').textContent=text;message(text);};
+  try{
+    stage('音源をこの端末の中で解析用に変換しています…');
+    const {decodeForAlignment,BrowserSync}=await import('./browser-sync.js');
+    const response=await fetch(asset.url);const samples=await decodeForAlignment(await response.blob(),Number($('#sync-range').value));
+    if(generation!==syncGeneration)return;
+    browserSync??=new BrowserSync();
+    const result=await browserSync.run(samples,project.lines,$('#sync-language').value,stage);
+    if(generation!==syncGeneration)return;
+    if(signature()!==initialSignature||sourceKey()!==initialKey)throw new Error('処理中に歌詞または音源が変わったため、結果は反映していません。再試行してください。');
+    const aligned=applyAlignment(project,result);aligned.alignment={...aligned.alignment,modelRevision:result.diagnostics.revision,runtime:result.diagnostics.runtime,analyzedSeconds:Number($('#sync-range').value)===30?Math.min(30,asset.duration):asset.duration};
+    commit(aligned);
+    const placed=result.lines.filter(l=>validTime(l.start)&&validTime(l.end)).length;
+    stage(`端末内解析：${result.lines.length}行中${placed}行に候補（${result.elapsedSeconds}秒）。未配置行を含め、必ず聴いて確認してください。`);
+    switchTab('editing');
+  }catch(error){if(error.name==='AbortError')stage('解析を中止しました。既存の時刻は変更していません。');else{stage(error.message);message(error.message,true);}}
+  finally{busy=false;$('#align').disabled=false;$('#cancel').hidden=true;}
+}
+
 for(const kind of ["media","audio","background"]) $("#"+kind+"-file").onchange=safely(async e=>{try{await upload(e.target.files[0],kind);}finally{e.target.value="";}});
 $("#apply-lyrics").onclick=safely(()=>applyLyrics({confirmReset:true}));
 $("#align").onclick=safely(()=>runJob("align"));$("#export").onclick=safely(()=>runJob("export"));
-$("#cancel").onclick=safely(async()=>{if(jobId) await api(`/api/jobs/${jobId}/cancel`,{method:"POST"});});
+$("#cancel").onclick=safely(async()=>{if(AUTO){syncGeneration++;browserSync?.cancel();$('#job-status').textContent='解析を中止しました。';message('解析を中止しました。既存の時刻は変更していません。');}else if(jobId) await api(`/api/jobs/${jobId}/cancel`,{method:"POST"});});
 $("#play").onclick=$("#fixed-play").onclick=$("#edit-play").onclick=safely(playback);
 $("#edit-listen").onclick=safely(()=>listenRow());$("#edit-seek").oninput=e=>seekTo(Number(e.target.value));
 $("#open-preview").onclick=$("#edit-open-preview").onclick=openPreview;
@@ -307,7 +341,7 @@ $("#lyrics").value=project.lyrics;attachMedia();setStyleInputs();
 // Available before the initial font wait, including a popup opened immediately.
 window.studioPreview={getState:previewState,paint:(target,overlay,state=previewState())=>drawComposite(target,overlay,state.project,state.time,visualSource()),
   toggle:async()=>{try{await playback();}catch(error){message(error.message,true);throw error;}},seek:seekTo,return:returnPreview,closed:previewClosed};
-window.addEventListener("pagehide",e=>{returnPreview();if(!e.persisted)localMedia?.dispose();});
+window.addEventListener("pagehide",e=>{returnPreview();if(AUTO){syncGeneration++;browserSync?.cancel();}if(!e.persisted)localMedia?.dispose();});
 if(LOCAL){
   document.body.classList.add("browser-editor");
   document.title="Lyric SRT — 端末内編集 β";
@@ -334,6 +368,25 @@ if(LOCAL){
   $("#prepare h2").textContent="01 素材と歌詞";$("#editing h2").textContent="03 修正";
   installEditorGuides();
   message("音源または作業ファイルを選んでください。");
+}
+if(AUTO){
+  $('header .tag').textContent='端末内自動同期 実験 0.4.0';
+  $('.intro h1').textContent='音源と歌詞から、SRTへ。';
+  $('.intro>div>p:last-child').textContent='PC接続なし・月額サービスなしの端末内解析を検証中です。候補を聴いて確認してからSRTへ保存します。';
+  $('.privacy p').textContent='音源・歌詞はこの端末内で処理します。実行時にHugging Faceからモデルを取得しますが、音源や歌詞は送信しません。初回は通信量と空き容量が必要です。';
+  $('#engine-state').textContent='実験版：スマホ実機での速度・安定性・歌唱精度は未検証です。';
+  const guide=$('.browser-guide');guide.querySelector('strong').textContent='音源と歌詞から始める';
+  guide.querySelector('ol').innerHTML='<li>音源を選び、正しい歌詞を貼り付けます。</li><li>下の注意事項を確認し「自動同期」で候補を作ります。</li><li>聴いて修正・確認後、JSONとSRTを保存します。</li>';
+  guide.querySelector('.hint').textContent='以前の作業JSONを読み込んで続きを編集することもできます。';
+  const settings=document.createElement('div');settings.className='local-sync-settings';
+  settings.innerHTML='<strong>端末内自動同期 · 実験版</strong><p class="hint">音源のみ・5分／100MB以内。初回は約45MBのモデル＋約23MBの処理プログラムを取得します。Wi-Fi推奨。軽量モデルのため認識漏れがあり、完成精度は保証できません。</p><label>歌唱言語<select id="sync-language"><option value="ja">日本語中心</option><option value="en">English中心</option><option value="mixed">日英混在（日本語中心で照合）</option></select></label><label>解析する範囲<select id="sync-range"><option value="30">まず冒頭30秒で試す</option><option value="300">曲全体（5分以内）</option></select></label><label class="model-consent"><input id="model-consent" type="checkbox"> モデル取得と実験版の注意事項を確認しました</label><p class="hint">解析中はこの画面を開いたままにしてください。中止・失敗では既存の時刻を変更しません。手動修正済みの行は再解析でも保護します。<a href="vendor/transformers-3.8.1/NOTICE.md" target="_blank" rel="noopener">モデル・ライセンス</a></p>';
+  $('#apply-lyrics').parentElement.before(settings);
+  const limitation=document.createElement('p');limitation.className='quality-warning';limitation.textContent='精度の注意：検証した日本語の伴奏付き実曲では、軽量モデルが十分な時刻候補を作れませんでした。日本語曲の完成用としてはまだ不十分です。';settings.prepend(limitation);
+  $('#align').hidden=false;$('#align').disabled=false;$('#align').onclick=safely(runBrowserSync);setControl($('#align'),'listen','自動同期','音源と入力歌詞をこの端末内で自動照合する');
+  const help=$('#editor-help');help.querySelector('.help-steps li:first-child p').textContent='音源を選び、正しい歌詞を貼り付けます。初回モデル取得に同意し「自動同期」を押してください。保存したJSONから続けることもできます。';
+  help.querySelector('details:last-child p').textContent='この実験画面では端末内で自動同期・時刻修正・SRT保存を行います。認識結果は本文を置き換えません。自動候補はすべて要確認です。MP4作成は行いません。モデル取得時は通信しますが、音源・歌詞は外部送信しません。';
+  $('footer').textContent='端末内自動同期 実験0.4.0。スマホ実機は未検証です。自動候補を聴いて確認し、作業JSONも保存してください。';
+  message('音源と歌詞を選び、まず30秒で試してください。自動候補は必ず確認が必要です。');
 }
 render();
 prepareProjectFont().catch(error=>message(error.message,true));
