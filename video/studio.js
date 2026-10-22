@@ -5,6 +5,7 @@ import {ensureFont} from "./fonts.js";
 import {drawComposite} from "./preview-render.js";
 import {BrowserMedia,attachBrowserAsset,isBrowserEditor} from "./browser-media.js?v=0.4.1";
 import {controlMarkup,setControl,installEditorGuides} from "./editor-ui.js?v=0.3.1";
+import {decodeReviewFragment} from './review-link.js?v=0.4.3';
 
 const $=selector=>document.querySelector(selector);
 const LOCAL=isBrowserEditor(location.href);
@@ -340,11 +341,20 @@ for(const [id,key] of [["style-mode","mode"],["font-size","fontSize"],["font-col
 }
 const saveWork=safely(()=>{if(project.lines.length||$("#lyrics").value.trim())applyLyrics();blobDownload(JSON.stringify(saveProject(project),null,2),"lyrics.lyricvideo.json","application/json");});
 $("#save-project").onclick=saveWork;$("#edit-save-project").onclick=saveWork;
-const openWork=safely(async e=>{const file=e.target.files[0];if(!file)return;try{const next=loadProject(JSON.parse(await file.text()));if((project.lines.length||$("#lyrics").value.trim())&&!window.confirm("現在の作業を読み込みファイルへ置き換えます。未保存の作業がある場合はキャンセルして先に保存してください。開きますか？"))return;++fontRequest;for(const key of Object.keys(localRequests))localRequests[key]++;unload();localMedia?.dispose();history.past=[];history.future=[];project=next;selected=next.lines[0]?.id;$("#lyrics").value=next.lyrics;attachMedia();setStyleInputs();persist();render();message("プロジェクトを開きました。時刻・要確認状態・書体を引き継ぎました。同じ素材を端末から選び直してください。");prepareProjectFont().catch(error=>message(error.message,true));}finally{e.target.value="";}});
+function openProject(data){
+  const next=loadProject(data);
+  if((project.lines.length||$("#lyrics").value.trim())&&!window.confirm("現在の作業を読み込みファイルへ置き換えます。未保存の作業がある場合はキャンセルして先に保存してください。開きますか？"))return false;
+  ++fontRequest;for(const key of Object.keys(localRequests))localRequests[key]++;
+  unload();localMedia?.dispose();history.past=[];history.future=[];project=next;selected=next.lines[0]?.id;
+  $("#lyrics").value=next.lyrics;attachMedia();setStyleInputs();persist();render();
+  message("プロジェクトを開きました。時刻・要確認状態・書体を引き継ぎました。同じ素材を端末から選び直してください。");
+  prepareProjectFont().catch(error=>message(error.message,true));return true;
+}
+const openWork=safely(async e=>{const file=e.target.files[0];if(!file)return;try{openProject(JSON.parse(await file.text()));}finally{e.target.value="";}});
 $("#project-file").onchange=$("#browser-project-file").onchange=openWork;
 const saveSrt=safely(()=>{if($("#lyrics").value!==project.lyrics)throw new Error("歌詞の入力欄に未反映の変更があります。先に「歌詞を反映」で確認してください。");const content=exportSrt(project,$("#srt-language").value);if(!content)throw new Error("確認済みの時刻を確認してください。");blobDownload(content,"lyrics.srt","application/x-subrip;charset=utf-8");message(`SRTを保存しました（確認済み ${cues(project,true).length}行）。要確認・未配置の行は含まれません。`);});
 $("#srt").onclick=saveSrt;$("#edit-srt").onclick=saveSrt;
-document.addEventListener("keydown",safely(e=>{if(e.defaultPrevented||document.querySelector("#editor-help")?.open||e.target.closest("input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
+document.addEventListener("keydown",safely(e=>{if(e.defaultPrevented||document.querySelector("#editor-help")?.open||e.target.closest("#incoming-review,input,textarea,select,[contenteditable]")||e.code==="Space"&&e.target.closest("[role=tab],#font-samples button"))return;if(e.code==="Space"){e.preventDefault();record("start");}else if(e.key.toLowerCase()==="e")record("end");else if(e.key.toLowerCase()==="k")return playback();else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();}}));
 video.addEventListener("seeking",()=>{if(project.assets.audio?.url&&Number.isFinite(audio.duration))audio.currentTime=Math.min(video.currentTime,audio.duration);});
 video.addEventListener("pause",()=>{if(project.assets.audio?.url)audio.pause();});
 video.addEventListener("timeupdate",()=>{if(project.assets.audio?.url&&!video.paused&&Number.isFinite(audio.duration)&&Math.abs(audio.currentTime-video.currentTime)>.1&&video.currentTime<audio.duration)audio.currentTime=video.currentTime;});
@@ -384,7 +394,7 @@ if(LOCAL){
   message("音源または作業ファイルを選んでください。");
 }
 if(AUTO){
-  $('header .tag').textContent='端末内自動同期 実験 0.4.2';
+  $('header .tag').textContent='端末内自動同期 実験 0.4.3';
   $('.intro h1').textContent='音源と歌詞から、SRTへ。';
   $('.intro>div>p:last-child').textContent='PC接続なし・月額サービスなしの端末内解析を検証中です。候補を聴いて確認してからSRTへ保存します。';
   $('.privacy p').textContent='音源・歌詞はこの端末内で処理します。実行時にHugging Faceからモデルを取得しますが、音源や歌詞は送信しません。初回は通信量と空き容量が必要です。';
@@ -399,10 +409,37 @@ if(AUTO){
   $('#align').hidden=false;$('#align').disabled=false;$('#align').onclick=safely(runBrowserSync);setControl($('#align'),'listen','自動同期','音源と入力歌詞をこの端末内で自動照合する');
   const help=$('#editor-help');help.querySelector('.help-steps li:first-child p').textContent='音源を選び、正しい歌詞を貼り付けます。初回モデル取得に同意し「自動同期」を押してください。保存したJSONから続けることもできます。';
   help.querySelector('details:last-child p').textContent='この実験画面では端末内で自動同期・時刻修正・SRT保存を行います。認識結果は本文を置き換えません。自動候補はすべて要確認です。MP4作成は行いません。モデル取得時は通信しますが、音源・歌詞は外部送信しません。';
-  $('footer').textContent='端末内自動同期 実験0.4.2。スマホ実機は未検証です。自動候補を聴いて確認し、作業JSONも保存してください。';
+  $('footer').textContent='端末内自動同期 実験0.4.3。スマホ実機は未検証です。自動候補を聴いて確認し、作業JSONも保存してください。';
   message('音源と歌詞を選び、まず30秒で試してください。自動候補は必ず確認が必要です。');
 }
 render();
+async function showIncomingReview(){
+  if(!LOCAL||!location.hash.startsWith('#review='))return;
+  $('#incoming-review')?.remove();
+  const fragment=location.hash;
+  // Remove project data from the address bar before any subsequent navigation.
+  window.history.replaceState(null,'',location.pathname+location.search);
+  const card=document.createElement('section');card.id='incoming-review';card.className='panel';
+  const title=document.createElement('h2');title.textContent='確認用の候補を開く';title.style.overflowWrap='anywhere';
+  const status=document.createElement('p');status.className='hint local-message';status.setAttribute('role','status');status.textContent='確認リンクを読み込んでいます…';
+  const buttons=document.createElement('div');buttons.className='buttons';
+  const cancel=document.createElement('button');cancel.textContent='閉じる';cancel.onclick=()=>card.remove();buttons.append(cancel);
+  card.append(title,status,buttons);$('main').prepend(card);
+  try{
+    const incoming=await decodeReviewFragment(fragment);if(!card.isConnected)return;
+    title.textContent=String(incoming.name||'確認用の候補').slice(0,160);
+    status.textContent=`${incoming.lines.length}行・時刻候補${cues(incoming).length}行。ファイルの保存は不要です。「候補を開く」のあと、同じ曲の音源または保存済み動画を選んでください。`;
+    const open=document.createElement('button');open.className='primary';open.id='open-incoming-review';open.textContent='候補を開く';
+    open.onclick=safely(()=>{if(openProject(incoming)){card.remove();switchTab('production');
+      uploadStatus('media','同じ曲のMP3・WAV、またはスマホに保存済みのMOV・MP4を選んでください。');
+      message('候補を開きました。同じ曲の音源・保存済み動画を選んでください。',false,true);
+      $('#media-file').scrollIntoView({block:'center',behavior:'auto'});}});
+    const save=document.createElement('button');save.id='save-incoming-review';save.textContent='JSONも保存';save.onclick=()=>blobDownload(JSON.stringify(saveProject(incoming),null,2),'review.lyricvideo.json','application/json');
+    buttons.prepend(open,save);
+  }catch(error){status.textContent=error.message;status.classList.add('error');message(error.message,true,true);}
+}
+showIncomingReview();
+window.addEventListener('hashchange',showIncomingReview);
 prepareProjectFont().catch(error=>message(error.message,true));
 function tick(){if(!clock().paused)draw();requestAnimationFrame(tick);}requestAnimationFrame(tick);
 if(!LOCAL)api("/api/health").then(()=>$("#engine-state").textContent="接続済み：このPCで同期・MP4書き出しを実行します。").catch(()=>{$("#engine-state").textContent="処理用PCが未接続です。READMEの起動手順を確認してください。";$("#align").disabled=true;$("#export").disabled=true;});

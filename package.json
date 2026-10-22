@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test srt-core.test.js video/core.test.js video/browser-media.test.js video/editor-ui.test.js video/browser-alignment.test.js",
+    "test": "node --test srt-core.test.js video/core.test.js video/browser-media.test.js video/editor-ui.test.js video/browser-alignment.test.js video/review-link.test.js",
     "test:browser-sync": "node engine/browser-sync-test.mjs",
     "test:browser-editor": "node engine/browser-editor-test.mjs",
     "test:browser": "node engine/browser-test.mjs",
