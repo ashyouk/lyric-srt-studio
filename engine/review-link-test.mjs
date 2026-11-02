@@ -67,7 +67,13 @@ try{
   check('existing SRT export works after explicit QA confirmation',srt.includes(row.text)&&(srt.match(/ --> /g)||[]).length===1);
   const saved=JSON.parse(await download('#edit-save-project'));
   check('ordinary project save still retains all imported rows without media URLs',saved.lines.length===expected.lines.length&&!saved.assets.media?.url);
-  if(!noMedia){await page.locator('#tab-production').click();await page.evaluate(t=>studio.seekTo(t),Math.min(45,expected.duration*.55));await page.locator('#stage').scrollIntoViewIfNeeded();await page.screenshot({path:resolve(output,'comparison-390.png')});}
+  if(!noMedia){
+    await page.locator('#tab-production').click();
+    await page.evaluate(t=>studio.seekTo(t),(row.start+row.end)/2+.1);
+    await page.waitForFunction(()=>{const c=document.querySelector('#canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3&&v>0);});
+    await page.locator('#stage').scrollIntoViewIfNeeded();
+    await page.screenshot({path:resolve(output,'comparison-390.png')});
+  }
   await page.goto(url);await page.waitForSelector('#open-incoming-review');const before=await page.evaluate(()=>JSON.stringify(studio.snapshot()));
   page.once('dialog',d=>d.dismiss());await page.locator('#open-incoming-review').tap();
   check('declining replacement preserves existing work and leaves incoming choice available',await page.evaluate(before=>JSON.stringify(studio.snapshot())===before,before)&&await page.locator('#incoming-review').isVisible());
